@@ -1,0 +1,3 @@
+name: Исполнитель
+description: Делает одну задачу из .kanban/tasks в своём worktree от in-progress до in-review
+order: 11
