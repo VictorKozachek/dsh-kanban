@@ -218,7 +218,7 @@ fi
 echo "== расход токенов и защита от перехвата задачи"
 usage_home="$WORK/usage-home"
 mkdir -p "$usage_home/storages/session_projcache/sessions"
-for session_id in sess-test sess-owner; do
+for session_id in sess-test sess-owner sess-reviewer; do
   printf '%s\n' '{"version":1,"record":{"rows":{"tokenUsage":{"seq":7,"val":{"totals":{"uncachedInputTokens":1000,"outputTokens":2000,"cacheReadTokens":3000,"cacheWriteTokens":0}}}}}}' \
     > "$usage_home/storages/session_projcache/sessions/$session_id.json"
 done
@@ -257,6 +257,25 @@ if ( cd "$guard_repo/worktrees/002" && ./bin/task-move.sh 002 in-progress --owne
 else
   fail "--force не сработал"
 fi
+# Возврат из ревью: чужая роль возвращает карточку без --force и без смены владельца.
+assign_repo="$WORK/return"
+make_repo "$assign_repo"
+( cd "$assign_repo" && ./bin/task-new.sh "Задача на возврат" --owner sess-worker >/dev/null 2>&1 )
+( cd "$assign_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-worker --role worker >/dev/null 2>&1 )
+( cd "$assign_repo/worktrees/001" && DSH_HOME="$usage_home" DSH_SESSION_ID=sess-worker \
+    ./bin/task-move.sh 001 in-review --role worker --tokens auto >/dev/null 2>&1 )
+return_card="$assign_repo/worktrees/001/.kanban/tasks/001.md"
+if ( cd "$assign_repo/worktrees/001" && DSH_HOME="$usage_home" DSH_SESSION_ID=sess-reviewer \
+     ./bin/task-move.sh 001 in-progress --role reviewer --tokens auto \
+     --note "вернуть: пункт 1, пункт 2" >"$WORK/out22" 2>&1 ); then
+  pass "ревьювер вернул карточку без --force"
+else
+  fail "возврат из ревью отклонён: $(cat "$WORK/out22")"
+fi
+if grep -q '^status: in-progress' "$return_card"; then pass "карточка вернулась в in-progress"; else fail "статус: $(grep '^status:' "$return_card")"; fi
+if grep -q '^owner: sess-worker' "$return_card"; then pass "владелец остался исполнителем"; else fail "owner: $(grep '^owner:' "$return_card")"; fi
+if grep -q '^role: worker' "$return_card"; then pass "роль снова worker"; else fail "role: $(grep '^role:' "$return_card")"; fi
+if grep -q '^tokens_reviewer: ' "$return_card"; then pass "расход ревьювера записан"; else fail "нет tokens_reviewer"; fi
 if ( cd "$guard_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-other >"$WORK/out13" 2>&1 ); then
   fail "чужую закреплённую задачу брать нельзя"
 else
