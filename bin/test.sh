@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# Прогнать все проверки набора: логика доски, рендер компонента, синтаксис скриптов.
+#
+#   bin/test.sh
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+NODE="$ROOT/bin/node.sh"
+if ! "$NODE" --which >/dev/null 2>&1; then
+  echo "нужен node — см. подсказку bin/node.sh" >&2
+  exit 1
+fi
+echo "node: $("$NODE" --which)"
+
+echo "== логика доски (парсер, слияние с worktree)"
+"$NODE" "$ROOT/dsh-kanban/test/parse.test.mjs"
+
+echo "== рендер доски (регистрация в контексте, колонки, карточки)"
+"$NODE" "$ROOT/dsh-kanban/test/render.test.mjs"
+
+echo "== синтаксис скриптов"
+for file in "$ROOT"/bin/*.sh; do
+  bash -n "$file" || { echo "ошибка синтаксиса: $file" >&2; exit 1; }
+done
+echo "   все скрипты разбираются"
+
+echo "== регрессии скриптов под системным bash (в macOS это 3.2)"
+bash "$ROOT/bin/test-scripts.sh"
+
+echo
+echo "все проверки прошли"

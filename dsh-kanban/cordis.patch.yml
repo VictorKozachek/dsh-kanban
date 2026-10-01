@@ -1,0 +1,12 @@
+# Патч-слой пакета dsh-kanban.
+#
+# `dsh plugin --profile web add <путь>` видит `dsh.bundle.patch` в package.json,
+# дописывает имя пакета в `dsh.profile.bundles` профиля и применяет этот файл
+# как отдельный слой после dsh-base и dsh-web-app. Поэтому руками править
+# ~/.dsh/profiles/web/cordis.patch.yml не нужно: строка ниже и есть монтирование.
+#
+# Ряд — обычный Loader-энтри. Host-половина пакета пустая, браузерная приходит
+# через `exports["./client"]` и объявление `dsh.client`.
+- insert:
+    - id: ui-kanban
+      name: 'dsh-kanban'

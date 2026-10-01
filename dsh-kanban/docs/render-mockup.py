@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+"""
+Рендер макета доски в PNG без браузера (headless Chrome под песочницей DSH не
+работает). Размеры, отступы и цвета доски берутся из НАСТОЯЩЕЙ таблицы стилей
+плагина: dump-styles.mjs отдаёт `styles` из lib/client.js, здесь они
+интерпретируются (px, отступы, color-mix с currentColor).
+
+Рамка приложения (сайдбар, разговор, полоса табов) нарисована отдельно — она не
+часть плагина и нужна только для наглядности.
+
+Запуск: bin/render-mockup.sh   или   python3 dsh-kanban/docs/render-mockup.py
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+from PIL import Image, ImageDraw, ImageFont
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+SCALE = 2
+
+FONT_REGULAR = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+FONT_MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
+if not os.path.exists(FONT_MONO):
+    FONT_MONO = FONT_REGULAR
+
+PALETTE = {
+    "dark": {
+        "bg": "#17181c", "panel": "#1c1e23", "panel2": "#212429",
+        "line": "rgba(255,255,255,.09)", "text": "#e6e8eb",
+        "dim": "rgba(230,232,235,.6)", "accent": "#3b82f6",
+    },
+    "light": {
+        "bg": "#ffffff", "panel": "#f7f8fa", "panel2": "#eef0f4",
+        "line": "rgba(15,20,30,.12)", "text": "#1b1d21",
+        "dim": "rgba(27,29,33,.6)", "accent": "#2563eb",
+    },
+}
+
+COLUMN_LABELS = {
+    "todo": "Нужно сделать",
+    "in-progress": "В работе",
+    "in-review": "На ревью",
+    "testing": "Тестирование",
+    "ready": "Готово к слиянию",
+    "merged": "Влито",
+    "blocked": "Заблокировано",
+}
+
+# Подписи ролей: те же слова, что в словаре плагина (ru).
+ROLE_LABELS = {
+    "worker": "исполнитель",
+    "reviewer": "ревьювер",
+    "verifier": "тестировщик",
+    "dispatcher": "оркестратор",
+}
+
+
+def role_label_of(card):
+    role = str(card.get("role") or "").strip().lower()
+    if not role:
+        return ""
+    return ROLE_LABELS.get(role, role)
+
+
+def format_tokens(value):
+    """Компактная запись числа — как formatTokens в плагине."""
+    try:
+        number = int(str(value).replace(" ", ""))
+    except ValueError:
+        return str(value)
+    if number < 1000:
+        return str(number)
+    for limit, suffix in ((1000000000, "G"), (1000000, "M"), (1000, "k")):
+        if number >= limit:
+            scaled = number / limit
+            text = f"{scaled:.1f}" if scaled < 10 else f"{scaled:.0f}"
+            return text.replace(".", ",") + suffix
+    return str(number)
+
+CARDS = [
+    {"id": "001", "title": "Скелет плагина dsh-kanban", "status": "merged",
+     "owner": "session-4f8c1a20-9e11", "role": "dispatcher", "tokens": "2100000",
+     "branch": "task/001", "updated": "23.09 14:02", "note": "влито в main"},
+    {"id": "002", "title": "Колонки, карточки и опрос .kanban/tasks", "status": "in-progress",
+     "owner": "session-71bd0c3e-4a92", "role": "worker", "tokens": "1840000",
+     "branch": "task/002", "updated": "23.09 15:40", "source": "worktree"},
+    {"id": "003", "title": "Пресеты dispatcher / worker / verifier", "status": "in-review",
+     "owner": "session-1a2b3c4d-77f0", "role": "reviewer", "tokens": "1240000",
+     "branch": "task/003", "updated": "23.09 15:12", "source": "worktree",
+     "note": "ревью: смотреть диф плагина"},
+    {"id": "004", "title": "Тесты парсера карточек в Node", "status": "testing",
+     "owner": "session-71bd0c3e-4a92", "role": "verifier", "tokens": "860000",
+     "branch": "task/004", "updated": "23.09 15:55", "source": "worktree",
+     "note": "сдано: 12/12 проверок"},
+    {"id": "005", "title": "Инсталлятор пресетов", "status": "ready",
+     "owner": "session-1a2b3c4d-77f0", "role": "verifier", "tokens": "1420000",
+     "branch": "task/005", "updated": "23.09 15:31", "source": "worktree",
+     "note": "проверено: YAML валиден"},
+    {"id": "006", "title": "Проверить активацию в живом GUI", "status": "blocked",
+     "owner": "session-4f8c1a20-9e11", "role": "worker", "tokens": "540000",
+     "updated": "23.09 15:58", "source": "worktree",
+     "note": "ждём перезапуск dsh web"},
+    {"id": "007", "title": "Описать протокол слияния веток", "status": "todo",
+     "updated": "23.09 15:20", "source": "worktree"},
+    {"id": "008", "title": "Починить вывод даты в карточке", "status": "todo",
+     "updated": "23.09 14:48", "source": "worktree"},
+]
+
+
+# ── утилиты ──────────────────────────────────────────────────────────────────
+
+def num(value, default=0.0):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return default
+    match = re.search(r"-?\d+(?:\.\d+)?", value)
+    return float(match.group()) if match else default
+
+
+def spacing(value):
+    """CSS-сокращение отступов → (вертикаль, горизонталь)."""
+    if isinstance(value, (int, float)):
+        return float(value), float(value)
+    if not isinstance(value, str):
+        return 0.0, 0.0
+    parts = [float(m.group()) for m in re.finditer(r"\d+(?:\.\d+)?", value)]
+    if not parts:
+        return 0.0, 0.0
+    if len(parts) == 1:
+        return parts[0], parts[0]
+    return parts[0], parts[1]
+
+
+def hex_rgb(value):
+    value = value.lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def rgba_rgb(value):
+    match = re.match(r"rgba?\(([^)]+)\)", value)
+    if not match:
+        return None
+    parts = [p.strip() for p in match.group(1).split(",")]
+    rgb = tuple(int(float(p)) for p in parts[:3])
+    alpha = float(parts[3]) if len(parts) > 3 else 1.0
+    return rgb, alpha
+
+
+def composite(fg, alpha, bg):
+    return tuple(int(round(fg[i] * alpha + bg[i] * (1 - alpha))) for i in range(3))
+
+
+def resolve(color, bg, text):
+    """Строка CSS-цвета → RGB, с разрешением color-mix(... currentColor N% ...)."""
+    if not isinstance(color, str) or color in ("", "transparent", "none"):
+        return bg
+    if color.startswith("color-mix"):
+        match = re.search(r"currentColor\s+(\d+(?:\.\d+)?)%", color)
+        if match:
+            return composite(text, float(match.group(1)) / 100.0, bg)
+        return bg
+    if color.startswith("#"):
+        return hex_rgb(color)
+    parsed = rgba_rgb(color)
+    if parsed:
+        rgb, alpha = parsed
+        return composite(rgb, alpha, bg)
+    return text
+
+
+def border_of(style, bg, text):
+    """`border: "1px solid X"` → (толщина, цвет)."""
+    value = style.get("border")
+    if isinstance(value, str) and "solid" in value:
+        return num(value, 0.0), resolve(value.split("solid", 1)[1].strip(), bg, text)
+    return 0.0, bg
+
+
+class Canvas:
+    """Рисование в координатах CSS-пикселей с учётом SCALE."""
+
+    def __init__(self, width, height, bg):
+        self.image = Image.new("RGB", (int(width * SCALE), int(height * SCALE)), bg)
+        self.draw = ImageDraw.Draw(self.image)
+        self.width = width
+        self.height = height
+
+    def rect(self, x, y, w, h, radius=0, fill=None, outline=None, line=1):
+        if w <= 0 or h <= 0:
+            return
+        radius = max(0.0, min(radius, min(w, h) / 2))
+        self.draw.rounded_rectangle(
+            [x * SCALE, y * SCALE, (x + w) * SCALE, (y + h) * SCALE],
+            radius=radius * SCALE,
+            fill=fill,
+            outline=outline,
+            width=max(1, int(round(line * SCALE))) if outline else 0,
+        )
+
+    def text(self, x, y, value, fnt, fill, anchor="la"):
+        self.draw.text((x * SCALE, y * SCALE), value, font=fnt, fill=fill, anchor=anchor)
+
+    def line(self, x0, y0, x1, y1, fill, width=1):
+        self.draw.line([x0 * SCALE, y0 * SCALE, x1 * SCALE, y1 * SCALE], fill=fill,
+                       width=max(1, int(round(width * SCALE))))
+
+
+def font(size, mono=False):
+    return ImageFont.truetype(FONT_MONO if mono else FONT_REGULAR, int(round(size * SCALE)))
+
+
+def measure(draw, value, fnt):
+    return draw.textlength(value, font=fnt) / SCALE
+
+
+def ellipsize(draw, value, fnt, max_width):
+    """Обрезать однострочный текст по ширине с многоточием."""
+    if measure(draw, value, fnt) <= max_width:
+        return value
+    cut = value
+    while cut and measure(draw, cut + "…", fnt) > max_width:
+        cut = cut[:-1]
+    return cut + "…"
+
+
+def wrap(draw, value, fnt, max_width, max_lines):
+    """Перенос по словам с обрезкой и многоточием."""
+    words = value.split()
+    lines, current = [], ""
+    index = 0
+    while index < len(words):
+        candidate = (current + " " + words[index]).strip()
+        if measure(draw, candidate, fnt) <= max_width or not current:
+            current = candidate
+            index += 1
+            if len(lines) == max_lines - 1 and index < len(words):
+                break
+        else:
+            lines.append(current)
+            current = ""
+            if len(lines) == max_lines:
+                break
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    consumed = " ".join(lines).split()
+    if len(consumed) < len(words) and lines:
+        last = lines[-1]
+        while last and measure(draw, last + "…", fnt) > max_width:
+            last = last[:-1]
+        lines[-1] = last + "…"
+    return lines or [""]
+
+
+LINE_FACTOR = 1.45
+
+
+# ── доска ────────────────────────────────────────────────────────────────────
+
+def build_board(styles, columns, theme, cards, header_width):
+    palette = PALETTE[theme]
+    panel_bg = hex_rgb(palette["panel"])
+    text = hex_rgb(palette["text"])
+
+    base = num(styles["root"].get("fontSize"), 12)
+    header_font = font(base * 0.95, mono=False)
+    meta_font = font(num(styles["headerMeta"].get("fontSize"), 11))
+    col_font = font(num(styles["columnHeader"].get("fontSize"), 11))
+    card_id_font = font(num(styles["cardId"].get("fontSize"), 11))
+    card_title_font = font(num(styles["cardTitle"].get("fontSize"), 12))
+    small_font = font(num(styles["meta"].get("fontSize"), 10))
+    note_font = font(num(styles["note"].get("fontSize"), 10))
+    count_font = font(num(styles["count"].get("fontSize"), 11))
+
+    column_w = num(styles["column"].get("width"), 232)
+    board_pad = spacing(styles["board"].get("padding"))[1]
+    board_gap = num(styles["board"].get("gap"), 8)
+
+    header_pad_x = spacing(styles["header"].get("padding"))[1]
+    header_pad_y = spacing(styles["header"].get("padding"))[0]
+    header_h = header_pad_y * 2 + base * LINE_FACTOR + 1
+
+    col_head_pad = spacing(styles["columnHeader"].get("padding"))
+    col_head_h = col_head_pad[0] * 2 + col_font.size / SCALE * LINE_FACTOR + 1
+
+    body_pad = spacing(styles["columnBody"].get("padding"))[0]
+    body_gap = num(styles["columnBody"].get("gap"), 6)
+    inner_w = column_w - body_pad * 2
+
+    card_pad = spacing(styles["card"].get("padding"))
+    card_gap = num(styles["card"].get("gap"), 3)
+    card_text_w = inner_w - card_pad[1] * 2 - 2
+
+    scratch = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+
+    def owner_chip_width(owner):
+        return measure(scratch, owner, small_font) + 12
+
+    def ellipsize(label, max_width):
+        """Обрезать подпись по доступной ширине — как ellipsis у чипа в плагине."""
+        if max_width <= 0:
+            return ""
+        if measure(scratch, label, small_font) <= max_width:
+            return label
+        cut = label
+        while cut and measure(scratch, cut + "…", small_font) > max_width:
+            cut = cut[:-1]
+        return (cut + "…") if cut else ""
+
+    def card_height(card):
+        height = card_pad[0] * 2 + 2
+        height += max(card_id_font.size / SCALE * LINE_FACTOR, small_font.size / SCALE * LINE_FACTOR + 4)
+        title_lines = wrap(scratch, card["title"], card_title_font, card_text_w, 2)
+        height += card_gap + len(title_lines) * card_title_font.size / SCALE * LINE_FACTOR
+        if card.get("branch"):
+            height += card_gap + small_font.size / SCALE * LINE_FACTOR
+        if card.get("tokens"):
+            height += card_gap + small_font.size / SCALE * LINE_FACTOR
+        if card.get("note"):
+            note_lines = wrap(scratch, card["note"], note_font, card_text_w, 2)
+            height += card_gap + len(note_lines) * note_font.size / SCALE * LINE_FACTOR
+        if card.get("updated"):
+            height += card_gap + small_font.size / SCALE * LINE_FACTOR
+        return height
+
+    grouped = []
+    for column in columns:
+        items = [c for c in cards if c["status"] == column["id"]]
+        heights = [card_height(c) for c in items]
+        grouped.append((column, items, heights))
+
+    tallest = max(
+        (col_head_h + body_pad * 2 + sum(heights) + body_gap * max(0, len(heights) - 1))
+        for _, _, heights in grouped
+    )
+    board_w = board_pad * 2 + column_w * len(columns) + board_gap * (len(columns) - 1)
+    board_h = header_h + tallest + board_pad
+    if not header_width:
+        header_width = board_w
+
+    canvas = Canvas(board_w, board_h, panel_bg)
+    draw = canvas.draw
+
+    # шапка доски
+    canvas.text(header_pad_x, header_pad_y + 1, "Канбан", header_font, text)
+    title_w = measure(draw, "Канбан", header_font)
+    canvas.text(header_pad_x + title_w + 10, header_pad_y + 2,
+                f"awg · {len(cards)} карточек", meta_font, composite(text, 0.6, panel_bg))
+    button_w, button_h = 26, base * LINE_FACTOR
+    border_w, border_c = border_of(styles["refresh"], panel_bg, text)
+    canvas.rect(header_width - header_pad_x - button_w, header_pad_y, button_w, button_h,
+                radius=6, outline=border_c, line=border_w)
+    canvas.text(header_width - header_pad_x - button_w / 2, header_pad_y + button_h / 2 - 1, "↻",
+                meta_font, composite(text, 0.75, panel_bg), anchor="mm")
+    canvas.line(0, header_h, min(header_width, board_w), header_h, composite(text, 0.12, panel_bg), 1)
+
+    # колонки
+    x = board_pad
+    for column, items, heights in grouped:
+        y = header_h + board_pad / 2
+        column_h = col_head_h + body_pad * 2 + sum(heights) + body_gap * max(0, len(heights) - 1)
+        col_border_w, col_border_c = border_of(styles["column"], panel_bg, text)
+        col_bg = resolve(styles["column"].get("background"), panel_bg, text)
+        canvas.rect(x, y, column_w, column_h, radius=10, fill=col_bg, outline=col_border_c, line=col_border_w)
+
+        # заголовок колонки
+        dot = num(styles["dot"].get("width"), 8)
+        canvas.rect(x + col_head_pad[1], y + col_head_pad[0] + (col_font.size / SCALE * LINE_FACTOR - dot) / 2,
+                    dot, dot, radius=dot / 2, fill=hex_rgb(column["color"]))
+        canvas.text(x + col_head_pad[1] + dot + 6, y + col_head_pad[0],
+                    COLUMN_LABELS[column["id"]].upper(), col_font, composite(text, 0.85, col_bg))
+        canvas.text(x + column_w - col_head_pad[1], y + col_head_pad[0], str(len(items)), count_font,
+                    composite(text, 0.6, col_bg), anchor="ra")
+        canvas.line(x, y + col_head_h, x + column_w, y + col_head_h, composite(text, 0.10, col_bg), 1)
+
+        # карточки
+        cy = y + col_head_h + body_pad
+        for card, height in zip(items, heights):
+            side = hex_rgb(column["color"])
+            card_border_w, card_border_c = border_of(styles["card"], col_bg, text)
+            card_bg = resolve(styles["card"].get("background"), col_bg, text)
+            canvas.rect(x + body_pad, cy, inner_w, height, radius=8, fill=card_bg, outline=card_border_c, line=card_border_w)
+            canvas.rect(x + body_pad, cy, 3, height, radius=1.5, fill=side)
+
+            tx = x + body_pad + card_pad[1]
+            ty = cy + card_pad[0]
+
+            canvas.text(tx, ty, "#" + card["id"], card_id_font, composite(text, 0.6, card_bg))
+            cursor = tx + measure(draw, "#" + card["id"], card_id_font) + 6
+            if card.get("source") == "worktree":
+                badge = styles.get("branchBadge", {})
+                badge_font = font(num(badge.get("fontSize"), 10))
+                badge_pad = spacing(badge.get("padding"))
+                label = "в ветке"
+                badge_w = measure(draw, label, badge_font) + badge_pad[1] * 2
+                badge_h = badge_font.size / SCALE * LINE_FACTOR + badge_pad[0] * 2
+                canvas.rect(cursor, ty + 1, badge_w, badge_h,
+                            radius=num(badge.get("borderRadius"), badge_h / 2),
+                            fill=composite(text, 0.14, card_bg))
+                canvas.text(cursor + badge_w / 2, ty + 1 + badge_h / 2 - 1, label, badge_font,
+                            composite(text, 0.85, card_bg), anchor="mm")
+                cursor += badge_w + 6
+            role_label = role_label_of(card)
+            if role_label:
+                chip_h = small_font.size / SCALE * LINE_FACTOR + 4
+                chip_w = owner_chip_width(role_label)
+                canvas.rect(cursor, ty - 1, chip_w, chip_h, radius=chip_h / 2,
+                            outline=composite(text, 0.18, card_bg), line=1)
+                canvas.text(cursor + chip_w / 2, ty + chip_h / 2 - 1, role_label, small_font,
+                            composite(text, 0.9, card_bg), anchor="mm")
+                cursor += chip_w + 6
+            if card.get("owner"):
+                label = card["owner"][:12] + "…" if len(card["owner"]) > 14 else card["owner"]
+                right = x + body_pad + inner_w - card_pad[1]
+                # В плагине чип владельца ужимает flex (max-width плюс ellipsis);
+                # здесь считаем остаток строки явно, чтобы макет не разъезжался.
+                label = ellipsize(label, right - cursor - 12)
+                if label:
+                    chip_w = owner_chip_width(label)
+                    chip_h = small_font.size / SCALE * LINE_FACTOR + 4
+                    canvas.rect(right - chip_w, ty - 1, chip_w, chip_h,
+                                radius=chip_h / 2, outline=composite(text, 0.18, card_bg), line=1)
+                    canvas.text(right - chip_w / 2, ty + chip_h / 2 - 1,
+                                label, small_font, composite(text, 0.9, card_bg), anchor="mm")
+            ty += max(card_id_font.size / SCALE * LINE_FACTOR, small_font.size / SCALE * LINE_FACTOR + 4) + card_gap
+
+            for line in wrap(scratch, card["title"], card_title_font, card_text_w, 2):
+                canvas.text(tx, ty, line, card_title_font, text)
+                ty += card_title_font.size / SCALE * LINE_FACTOR
+            if card.get("branch"):
+                ty += card_gap
+                canvas.text(tx, ty, card["branch"], small_font, composite(text, 0.6, card_bg))
+                ty += small_font.size / SCALE * LINE_FACTOR
+            if card.get("tokens"):
+                ty += card_gap
+                canvas.text(tx, ty, "токенов: " + format_tokens(card["tokens"]), small_font,
+                            composite(text, 0.6, card_bg))
+                ty += small_font.size / SCALE * LINE_FACTOR
+            if card.get("note"):
+                ty += card_gap
+                for line in wrap(scratch, card["note"], note_font, card_text_w, 2):
+                    canvas.text(tx, ty, line, note_font, hex_rgb("#f97316"))
+                    ty += note_font.size / SCALE * LINE_FACTOR
+            if card.get("updated"):
+                ty += card_gap
+                canvas.text(tx, ty, card["updated"], small_font, composite(text, 0.6, card_bg))
+            cy += height + body_gap
+        x += column_w + board_gap
+
+    return canvas.image, board_w, board_h
+
+
+# ── рамка приложения ─────────────────────────────────────────────────────────
+
+def build_frame(board, board_w, board_h, view, theme):
+    palette = PALETTE[theme]
+    bg = hex_rgb(palette["bg"])
+    panel = hex_rgb(palette["panel"])
+    panel2 = hex_rgb(palette["panel2"])
+    text = hex_rgb(palette["text"])
+    dim = composite(text, 0.55, bg)
+    line = resolve(palette["line"], bg, text)
+
+    f12 = font(12.5)
+    f11 = font(11)
+    f10 = font(10.5)
+    f13 = font(13)
+
+    if view == "full":
+        width, height = board_w + 32, board_h + 78
+        canvas = Canvas(width, height, panel)
+        strip_h = 40
+        canvas.line(0, strip_h, width, strip_h, line, 1)
+        canvas.text(12, 12, "Файлы", f12, composite(text, 0.55, panel))
+        canvas.rect(68, 7, 78, 26, radius=7, fill=panel2)
+        canvas.text(107, 12, "Канбан", f12, text, anchor="ma")
+        canvas.text(width - 20, 12, "↗", f13, composite(text, 0.45, panel), anchor="ra")
+        canvas.image.paste(board, (16 * SCALE, (strip_h + 12) * SCALE))
+        canvas.text(width / 2, height - 22,
+                    "Макет доски: размеры и цвета взяты из таблицы стилей плагина",
+                    f10, composite(text, 0.38, panel), anchor="ma")
+        return canvas.image
+
+    width, height = 1680, 900
+    left_w, right_w = 236, 1010
+    conv_w = width - left_w - right_w
+    canvas = Canvas(width, height, bg)
+
+    # левый сайдбар
+    canvas.rect(0, 0, left_w, height, fill=panel)
+    canvas.line(left_w, 0, left_w, height, line, 1)
+    canvas.text(12, 16, "DeepSeek Harness", f12, text)
+    canvas.text(12, 52, "ПРОЕКТЫ", f10, composite(text, 0.4, panel))
+    rows = [("awg", "#22c55e", "2", True), ("awg-t002", "#3b82f6", "1", False), ("awg-t003", "#3b82f6", "1", False)]
+    y = 72
+    for name, color, badge, active in rows:
+        if active:
+            canvas.rect(8, y - 3, left_w - 16, 26, radius=7, fill=panel2)
+        canvas.rect(16, y + 5, 7, 7, radius=4, fill=hex_rgb(color))
+        canvas.text(31, y, name, f12, text)
+        canvas.text(left_w - 16, y + 1, badge, f10, composite(text, 0.5, panel), anchor="ra")
+        y += 28
+    canvas.text(12, y + 16, "СЕССИИ · AWG", f10, composite(text, 0.4, panel))
+    y += 36
+    for name, color, badge, active in [("Диспетчер", "#f59e0b", "сейчас", True), ("Верификатор", "#94a3b8", "", False)]:
+        if active:
+            canvas.rect(8, y - 3, left_w - 16, 26, radius=7, fill=panel2)
+        canvas.rect(16, y + 5, 7, 7, radius=4, fill=hex_rgb(color))
+        canvas.text(31, y, name, f12, text)
+        if badge:
+            canvas.text(left_w - 16, y + 1, badge, f10, composite(text, 0.5, panel), anchor="ra")
+        y += 28
+
+    # разговор
+    cx = left_w
+    canvas.rect(cx, 0, conv_w, height, fill=bg)
+    canvas.line(cx + conv_w, 0, cx + conv_w, height, line, 1)
+    canvas.line(cx, 40, cx + conv_w, 40, line, 1)
+    canvas.text(cx + 14, 12, "Диспетчер", f12, text)
+    canvas.rect(cx + 82, 10, 74, 20, radius=10, outline=line, line=1)
+    canvas.text(cx + 119, 14, "dispatcher", f10, composite(text, 0.75, bg), anchor="ma")
+    canvas.text(cx + conv_w - 16, 13, "⇱", f13, composite(text, 0.45, bg), anchor="ra")
+
+    bubble = canvas.rect
+    def message(text_value, y0, is_user, width_ratio=0.9):
+        fnt = f12
+        lines = wrap(canvas.draw, text_value, fnt, (conv_w - 60) * width_ratio, 4)
+        w = max(measure(canvas.draw, l, fnt) for l in lines) + 20
+        h = len(lines) * 12.5 * LINE_FACTOR + 16
+        x0 = cx + conv_w - 18 - w if is_user else cx + 18
+        if is_user:
+            bubble(x0, y0, w, h, radius=10, fill=panel2, outline=line, line=1)
+        for i, l in enumerate(lines):
+            canvas.text(x0 + 10, y0 + 8 + i * 12.5 * LINE_FACTOR, l, fnt, text if is_user else composite(text, 0.85, bg))
+        return y0 + h + 12
+
+    my = 60
+    my = message("Разбей работу по доске на задачи и раздай воркерам: плагин, пресеты, тесты.", my, True)
+    my = message("Завёл карточки 002–005 и три worktree. Воркеры в работе, четвёртая задача ждёт верификатора.", my, False)
+    mono = font(11.5, mono=True)
+    for tool in ['$ bin/task-new.sh "Колонки, карточки и опрос .kanban/tasks"',
+                 "задача 002: .kanban/tasks/002.md · worktree awg-t002 (task/002)"]:
+        box_w = conv_w - 36
+        canvas.rect(cx + 18, my, box_w, 26, radius=8, fill=panel, outline=line, line=1)
+        canvas.text(cx + 27, my + 6, ellipsize(canvas.draw, tool, mono, box_w - 18), mono,
+                    composite(text, 0.8, panel))
+        my += 34
+    my = message("Слежу за доской: как только карточка уйдёт в review — проверю и слью ветку.", my, False)
+    canvas.rect(cx + 18, height - 66, conv_w - 36, 44, radius=10, outline=line, line=1)
+    canvas.text(cx + 32, height - 52, "Написать сообщение…", f12, composite(text, 0.5, bg))
+
+    # правая панель с доской
+    px = left_w + conv_w
+    canvas.rect(px, 0, right_w, height, fill=panel)
+    canvas.line(px, 0, px, height, line, 1)
+    canvas.rect(px + 8, 7, right_w - 16, 26, radius=0, fill=None)
+    canvas.rect(px + 10, 7, 74, 26, radius=7, fill=None)
+    canvas.text(px + 22, 12, "Файлы", f12, composite(text, 0.55, panel))
+    canvas.rect(px + 92, 7, 84, 26, radius=7, fill=panel2)
+    canvas.text(px + 134, 12, "Канбан", f12, text, anchor="ma")
+    canvas.text(px + right_w - 34, 12, "↗", f13, composite(text, 0.45, panel), anchor="ra")
+    canvas.text(px + right_w - 14, 12, "✕", f13, composite(text, 0.45, panel), anchor="ra")
+    canvas.line(px, 40, px + right_w, 40, line, 1)
+
+    # доска обрезается по ширине панели — как при горизонтальной прокрутке
+    visible_w = right_w
+    board_crop = board.crop((0, 0, int(visible_w * SCALE), min(board.height, int((height - 40) * SCALE))))
+    canvas.image.paste(board_crop, (px * SCALE, 40 * SCALE))
+
+    canvas.text(width / 2, height - 16,
+                "Макет: рамка приложения нарисована приблизительно, доска — размерами и цветами плагина",
+                f10, composite(text, 0.35, panel), anchor="ma")
+    return canvas.image
+
+
+def status_of(card, columns):
+    status = card["status"].strip().lower().replace(" ", "-")
+    aliases = {"in_progress": "in-progress", "review": "testing", "done": "ready"}
+    status = aliases.get(status, status)
+    known = [c["id"] for c in columns]
+    return status if status in known else "todo"
+
+
+def main():
+    payload = json.loads(subprocess.check_output(["node", os.path.join(HERE, "dump-styles.mjs")], cwd=ROOT))
+    styles, columns = payload["styles"], payload["columns"]
+    for card in CARDS:
+        card["status"] = status_of(card, columns)
+
+    outputs = []
+    for theme in ("dark", "light"):
+        for view in ("panel", "full"):
+            board, board_w, board_h = build_board(styles, columns, theme, CARDS,
+                                                  1010 if view == "panel" else 0)
+            image = build_frame(board, board_w, board_h, view, theme)
+            path = os.path.join(HERE, f"board-mockup-{view}-{theme}.png")
+            image.save(path)
+            outputs.append(path)
+            print("готово:", os.path.relpath(path, ROOT))
+    return outputs
+
+
+if __name__ == "__main__":
+    main()
