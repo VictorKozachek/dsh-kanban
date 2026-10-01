@@ -277,18 +277,46 @@ if grep -q '^tokens_worker: 6000' "$guard_card"; then pass "расход рол�
 if grep -q '^tokens: 6000' "$guard_card"; then pass "суммарный расход посчитан"; else fail "tokens: $(grep '^tokens:' "$guard_card")"; fi
 if grep -q '^since: ' "$guard_card"; then pass "метка since записана"; else fail "since не записан"; fi
 
-echo "== install-presets: путь отказа и нормальная установка"
-"$SYS_BASH" "$ROOT/bin/install-presets.sh" --standard "$WORK/nope" --target "$WORK/presets-x" >/dev/null 2>"$WORK/err3"
-if (( $? != 0 )) && grep -q "искал здесь" "$WORK/err3"; then
-  pass "неверный --standard даёт понятный отказ, а не падение оболочки"
+echo "== пресеты ролей: генерация строк и установка в патч-слой профиля"
+preset_home="$WORK/preset-home"
+mkdir -p "$preset_home/profiles/demo"
+printf '[]\n' > "$preset_home/profiles/demo/cordis.patch.yml"
+if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard.patch.yml" \
+     --personas "$ROOT/agent-presets" --out "$WORK/role-presets.patch.yml" >"$WORK/out20" 2>&1; then
+  rows=$(grep -c 'id: preset-' "$WORK/role-presets.patch.yml")
+  if [[ "$rows" == "4" ]]; then pass "сгенерированы строки четырёх ролей"; else fail "строк пресетов: $rows"; fi
+  if grep -q "Ты исполнитель" "$WORK/role-presets.patch.yml"; then
+    pass "персона роли попала в строку"
+  else
+    fail "в строке нет персоны роли"
+  fi
+  if grep -q '!!js' "$WORK/role-presets.patch.yml"; then
+    pass "js-условия шаблона сохранены"
+  else
+    fail "потеряны !!js-условия"
+  fi
 else
-  fail "отказ на неверном --standard: $(cat "$WORK/err3")"
+  fail "генерация пресетов упала: $(cat "$WORK/out20")"
 fi
-if "$SYS_BASH" "$ROOT/bin/install-presets.sh" --target "$WORK/presets" >/dev/null 2>"$WORK/err4"; then
-  count=$(find "$WORK/presets" -name agent.cordis.yml | wc -l | tr -d ' ')
-  if [[ "$count" == "4" ]]; then pass "четыре пресета поставлены"; else fail "поставлено пресетов: $count"; fi
+if "$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+     --profiles-dir "$preset_home/profiles" --profile demo >"$WORK/out21" 2>&1; then
+  if grep -q "preset-worker" "$preset_home/profiles/demo/cordis.patch.yml"; then
+    pass "строки установлены в патч-слой профиля"
+  else
+    fail "в патч-слое нет preset-worker"
+  fi
 else
-  fail "install-presets упал: $(cat "$WORK/err4")"
+  fail "установка пресетов упала: $(cat "$WORK/out21")"
+fi
+"$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+  --profiles-dir "$preset_home/profiles" --profile demo >/dev/null 2>&1
+blocks=$(grep -c "пресеты ролей (bin/install-presets.sh)" "$preset_home/profiles/demo/cordis.patch.yml")
+if [[ "$blocks" == "1" ]]; then pass "повторная установка идемпотентна"; else fail "блоков пресетов: $blocks"; fi
+if "$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+     --profiles-dir "$preset_home/profiles" --profile ghost >/dev/null 2>&1; then
+  fail "установка в несуществующий профиль должна падать"
+else
+  pass "несуществующий профиль даёт понятный отказ"
 fi
 
 echo "== node без PATH: резолвер bin/node.sh"
