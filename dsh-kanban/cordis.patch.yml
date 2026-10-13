@@ -10,3 +10,12 @@
 - insert:
     - id: ui-kanban
       name: 'dsh-kanban'
+      config:
+        # Корни проектов, где сторож следит за .kanban/tasks.
+        boards:
+          - /Users/victor/projects/m-future
+        # id сессий ролей: их нужно обновлять, когда роль пересоздают в GUI.
+        # Пусто — сторож будит только владельцев карточек (owner из карточки).
+        roles:
+          reviewer: session-8b6b5c88-64aa-4887-967b-474229ee920f
+          dispatcher: session-fcf2bab8-e7bf-431d-b717-c359dedad3ec

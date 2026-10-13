@@ -1,0 +1,160 @@
+/**
+ * Чистая часть сторожевого плагина доски (`dsh-kanban`, host-половина).
+ *
+ * Здесь нет ни файловой системы, ни сессий: только разбор карточек и решение
+ * «когда и кому отправить наряд». Благодаря этому правила проверяются тестами
+ * без запуска приложения, а host-обвязка (`lib/index.js`) остаётся тонкой.
+ *
+ * Идея: доска — это файлы, а роль узнаёт о работе только когда ей напишут.
+ * Сторож сравнивает два снимка каталога `.kanban/tasks` и по переходу статуса
+ * решает, кого будить.
+ */
+
+/** Поля front matter, которые влияют на решение (остальное читает доска). */
+const FIELDS = ["id", "title", "status", "owner", "role"];
+
+/**
+ * Разобрать карточку: front matter между первыми `---` плюс первый абзац задачи.
+ *
+ * @param text - содержимое файла карточки.
+ * @returns Объект с полями из front matter (без кавычек) и флагом `broken`.
+ */
+export function parseCard(text) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return { broken: true };
+  const card = { broken: false };
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "---") break;
+    const match = /^([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/.exec(line);
+    if (!match) continue;
+    const [, key, raw] = match;
+    if (!FIELDS.includes(key)) continue;
+    let value = raw.trim();
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      value = value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+    card[key] = value;
+  }
+  if (!card.id) return { broken: true };
+  return card;
+}
+
+/**
+ * Снять снимок доски: `id` → карточка.
+ *
+ * @param entries - пары `[имя файла, содержимое]`.
+ * @returns Снимок карточек, по которому считается переход.
+ */
+export function snapshotCards(entries) {
+  const snapshot = new Map();
+  for (const [name, text] of entries ?? []) {
+    if (!String(name).endsWith(".md") || String(name) === "README.md") continue;
+    const card = parseCard(text);
+    if (card.broken) continue;
+    snapshot.set(String(card.id), card);
+  }
+  return snapshot;
+}
+
+/** Статусы, из которых возврат в работу означает «карточку вернула другая роль». */
+const RETURNED_FROM = new Set(["in-review", "testing", "ready", "blocked"]);
+
+function commandTail(card) {
+  return `bin/task-move.sh ${card.id}`;
+}
+
+function notice(card, sessionId, text, kind) {
+  return { cardId: card.id, sessionId, kind, text };
+}
+
+/**
+ * Решить, кого будить по переходам между снимками.
+ *
+ * @param previous - снимок до изменения.
+ * @param next - снимок после изменения.
+ * @param options - `{ reviewer, verifier, dispatcher }` — id сессий ролей.
+ * @returns Список нарядов `{cardId, sessionId, kind, text}` в порядке карточек.
+ */
+export function planNotices(previous, next, options = {}) {
+  const notices = [];
+  const role = (name) => {
+    const value = options?.[name];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  };
+
+  for (const [id, card] of next ?? []) {
+    const before = previous?.get(id);
+    const status = card.status ?? "";
+    if (before && (before.status ?? "") === status) continue;
+    if (!before && !status) continue;
+
+    const place = `.kanban/tasks/${id}.md`;
+    const title = card.title ? ` «${card.title}»` : "";
+
+    if (status === "in-progress") {
+      // Из очереди задачу берёт сам исполнитель — будить некого. А вот возврат
+      // из ревью, тестов, ready или блокировки адресован владельцу карточки.
+      if (!before || !RETURNED_FROM.has(before.status ?? "")) continue;
+      if (!card.owner) continue;
+      notices.push(
+        notice(
+          card,
+          card.owner,
+          `Доска: карточка #${id}${title} вернулась в работу из «${before.status}». ` +
+            `Прочитай ${place} (замечания) и продолжай. Закончишь — ` +
+            `${commandTail(card)} in-review --role worker --tokens auto --note "..."`,
+          "returned",
+        ),
+      );
+      continue;
+    }
+
+    if (status === "in-review") {
+      const target = role("reviewer");
+      if (!target || target === card.owner) continue;
+      notices.push(
+        notice(
+          card,
+          target,
+          `Доска: карточка #${id}${title} ждёт ревью (${place}). ` +
+            `Принял — ${commandTail(card)} testing --role reviewer --tokens auto --note "..."; ` +
+            `есть замечания — впиши их в карточку и ${commandTail(card)} in-progress --role reviewer --note "..."`,
+          "review",
+        ),
+      );
+      continue;
+    }
+
+    if (status === "testing") {
+      const target = role("verifier");
+      if (!target || target === card.owner) continue;
+      notices.push(
+        notice(
+          card,
+          target,
+          `Доска: карточка #${id}${title} ждёт тестирования (${place}). ` +
+            `Прошло — ${commandTail(card)} ready --role verifier --tokens auto --note "..."; ` +
+            `не прошло — впиши причину в карточку и ${commandTail(card)} in-progress --role verifier --note "..."`,
+          "test",
+        ),
+      );
+      continue;
+    }
+
+    if (status === "ready") {
+      const target = role("dispatcher");
+      if (!target) continue;
+      notices.push(
+        notice(
+          card,
+          target,
+          `Доска: карточка #${id}${title} готова к слиянию: bin/task-commit.sh ${card.id}`,
+          "merge",
+        ),
+      );
+    }
+  }
+
+  return notices;
+}

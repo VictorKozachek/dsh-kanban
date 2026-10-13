@@ -1,0 +1,184 @@
+/**
+ * Тесты чистой части сторожа доски: разбор карточек и правила нарядов.
+ *
+ * Запуск: node dsh-kanban/test/watcher.test.mjs
+ */
+import assert from "node:assert/strict";
+import { parseCard, planNotices, snapshotCards } from "../lib/watcher-core.js";
+
+let failed = 0;
+let passed = 0;
+
+function check(name, fn) {
+  try {
+    fn();
+    passed += 1;
+    console.log(`   ok: ${name}`);
+  } catch (error) {
+    failed += 1;
+    console.log(`   ПРОВАЛ: ${name}\n      ${error.message}`);
+  }
+}
+
+function card(id, status, extra = {}) {
+  const fields = [
+    "---",
+    `id: "${id}"`,
+    `title: Задача ${id}`,
+    `status: ${status}`,
+    `owner: "${extra.owner ?? ""}"`,
+    `role: "${extra.role ?? ""}"`,
+    "---",
+    "",
+    "## Задача",
+    "что-то"
+  ];
+  return fields.join("\n");
+}
+
+function snapshot(list) {
+  return snapshotCards(list.map(([id, status, extra]) => [`${id}.md`, card(id, status, extra)]));
+}
+
+const ROLES = { reviewer: "sess-reviewer", verifier: "sess-verifier", dispatcher: "sess-dispatcher" };
+
+console.log("== разбор карточек");
+check("поля читаются, кавычки снимаются", () => {
+  const parsed = parseCard(card("007", "in-progress", { owner: "sess-worker" }));
+  assert.equal(parsed.id, "007");
+  assert.equal(parsed.status, "in-progress");
+  assert.equal(parsed.owner, "sess-worker");
+  assert.equal(parsed.broken, false);
+});
+check("экранированные кавычки в owner снимаются", () => {
+  const text = '---\nid: "001"\nstatus: todo\nowner: "a\\"b"\n---\n';
+  assert.equal(parseCard(text).owner, 'a"b');
+});
+check("файл без front matter помечается сломанным", () => {
+  assert.equal(parseCard("просто текст").broken, true);
+});
+check("карточка без id помечается сломанной", () => {
+  assert.equal(parseCard('---\ntitle: Без id\nstatus: todo\n---\n').broken, true);
+});
+check("README и не-markdown в снимок не попадают", () => {
+  const shot = snapshotCards([["README.md", "# Доска"], ["notes.txt", "x"], ["007.md", card("007", "todo")]]);
+  assert.deepEqual([...shot.keys()], ["007"]);
+});
+
+console.log("== правила нарядов");
+check("новая карточка в todo никого не будит", () => {
+  assert.deepEqual(planNotices(new Map(), snapshot([["007", "todo"]]), ROLES), []);
+});
+check("карточку взяли из очереди — исполнитель сам знает, будить некого", () => {
+  const notices = planNotices(
+    snapshot([["007", "todo", { owner: "sess-worker" }]]),
+    snapshot([["007", "in-progress", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.deepEqual(notices, []);
+});
+check("уход на ревью будит ревьювера", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-progress", { owner: "sess-worker" }]]),
+    snapshot([["007", "in-review", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].sessionId, "sess-reviewer");
+  assert.equal(notices[0].kind, "review");
+  assert.match(notices[0].text, /ждёт ревью/);
+  assert.match(notices[0].text, /\.kanban\/tasks\/007\.md/);
+});
+check("ревьювер принял — будим тестировщика", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-review", { owner: "sess-worker" }]]),
+    snapshot([["007", "testing", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].sessionId, "sess-verifier");
+  assert.equal(notices[0].kind, "test");
+});
+check("ревьювер вернул карточку — будим исполнителя", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-review", { owner: "sess-worker" }]]),
+    snapshot([["007", "in-progress", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].sessionId, "sess-worker");
+  assert.equal(notices[0].kind, "returned");
+  assert.match(notices[0].text, /вернулась в работу/);
+});
+check("возврат из blocked и из testing тоже будит исполнителя", () => {
+  for (const from of ["blocked", "testing", "ready"]) {
+    const notices = planNotices(
+      snapshot([["007", from, { owner: "sess-worker" }]]),
+      snapshot([["007", "in-progress", { owner: "sess-worker" }]]),
+      ROLES
+    );
+    assert.equal(notices.length, 1, `из ${from}`);
+    assert.equal(notices[0].sessionId, "sess-worker", `из ${from}`);
+  }
+});
+check("готово к слиянию — будим оркестратора", () => {
+  const notices = planNotices(
+    snapshot([["007", "testing", { owner: "sess-worker" }]]),
+    snapshot([["007", "ready", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].sessionId, "sess-dispatcher");
+  assert.match(notices[0].text, /task-commit\.sh 007/);
+});
+check("повторная запись того же статуса не спамит", () => {
+  const before = snapshot([["007", "in-review", { owner: "sess-worker" }]]);
+  const after = snapshot([["007", "in-review", { owner: "sess-worker" }]]);
+  assert.deepEqual(planNotices(before, after, ROLES), []);
+});
+check("слияние никого не будит", () => {
+  const notices = planNotices(
+    snapshot([["007", "ready", { owner: "sess-worker" }]]),
+    snapshot([["007", "merged", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.deepEqual(notices, []);
+});
+check("без настроенных сессий ролей нарядов нет и падений нет", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-progress", { owner: "sess-worker" }]]),
+    snapshot([["007", "in-review", { owner: "sess-worker" }]]),
+    {}
+  );
+  assert.deepEqual(notices, []);
+});
+check("карточка без владельца при возврате никого не будит", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-review"]]),
+    snapshot([["007", "in-progress"]]),
+    ROLES
+  );
+  assert.deepEqual(notices, []);
+});
+check("ревьювер-владелец своей карточки не будится дважды", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-progress", { owner: "sess-reviewer" }]]),
+    snapshot([["007", "in-review", { owner: "sess-reviewer" }]]),
+    ROLES
+  );
+  assert.deepEqual(notices, []);
+});
+check("несколько карточек — наряды по каждой", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-progress", { owner: "sess-worker" }], ["008", "in-progress", { owner: "sess-worker" }]]),
+    snapshot([["007", "in-review", { owner: "sess-worker" }], ["008", "testing", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.deepEqual(
+    notices.map((item) => [item.cardId, item.kind]),
+    [["007", "review"], ["008", "test"]]
+  );
+});
+
+console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
+if (failed > 0) process.exit(1);
