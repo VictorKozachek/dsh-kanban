@@ -330,7 +330,7 @@ def build_board(styles, columns, theme, cards, header_width):
         height += card_gap + len(title_lines) * card_title_font.size / SCALE * LINE_FACTOR
         if card.get("branch"):
             height += card_gap + small_font.size / SCALE * LINE_FACTOR
-        if card.get("tokens"):
+        if has_tokens(card):
             height += card_gap + small_font.size / SCALE * LINE_FACTOR
         if card.get("note"):
             note_lines = wrap(scratch, card["note"], note_font, card_text_w, 2)
@@ -428,11 +428,11 @@ def build_board(styles, columns, theme, cards, header_width):
             if card.get("owner"):
                 label = card["owner"][:12] + "…" if len(card["owner"]) > 14 else card["owner"]
                 right = x + body_pad + inner_w - card_pad[1]
-                # В плагине чип владельца ужимает flex (max-width плюс ellipsis);
-                # здесь считаем остаток строки явно, чтобы макет не разъезжался.
-                # В плагине у чипа владельца есть max-width и ellipsis; держим
-                # тот же предел, иначе длинный id в макете шире, чем на доске.
-                owner_max = (num(styles["owner"].get("maxWidth"), 110) - 12) * SCALE
+                # В плагине чип владельца ужимает flex (max-width плюс ellipsis).
+                # Здесь считаем остаток строки и тот же предел, что у плагина:
+                # measure() и раскладка — в CSS-пикселях, SCALE применяется только
+                # при отрисовке, поэтому множить предел на SCALE нельзя.
+                owner_max = num(styles["owner"].get("maxWidth"), 110) - 12
                 label = ellipsize(label, min(right - cursor - 12, owner_max))
                 if label:
                     chip_w = owner_chip_width(label)
