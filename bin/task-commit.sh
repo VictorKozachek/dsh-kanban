@@ -207,7 +207,9 @@ target="$(git -C "$ROOT" symbolic-ref --short -q HEAD || echo main)"
 
 if (( DRY_RUN == 1 )); then
   if (( NO_MERGE == 1 )); then
-    echo "режим: --no-merge, слияния не будет (ветки $BRANCH и $task_branch нет)"
+    missing="$BRANCH"
+    if [[ "$task_branch" != "$BRANCH" ]]; then missing="$BRANCH и $task_branch"; fi
+    echo "режим: --no-merge, слияния не будет (нет ветки $missing)"
     echo "карточка: $id → merged"
     echo "причина: $REASON"
     exit 0
