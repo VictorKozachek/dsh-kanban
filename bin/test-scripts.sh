@@ -215,6 +215,68 @@ else
   fi
 fi
 
+echo "== --no-merge: задача, работа по которой уже в main"
+nomerge_repo="$WORK/nomerge"
+make_repo "$nomerge_repo"
+( cd "$nomerge_repo" && ./bin/task-new.sh "Работа прямо в main" --no-worktree --owner sess-test >/dev/null 2>&1 )
+for step in in-progress in-review testing ready; do
+  ( cd "$nomerge_repo" && ./bin/task-move.sh 001 "$step" --owner sess-test --role worker >/dev/null 2>&1 )
+done
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 >"$WORK/out25" 2>&1 ); then
+  fail "слияние без ветки не должно проходить"
+else
+  if grep -q -- "--no-merge" "$WORK/out25"; then
+    pass "отсутствие ветки подсказывает --no-merge"
+  else
+    fail "сообщение: $(cat "$WORK/out25")"
+  fi
+fi
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge >"$WORK/out26" 2>&1 ); then
+  fail "--no-merge без причины не должен проходить"
+else
+  if grep -q "требует --reason" "$WORK/out26"; then
+    pass "--no-merge требует причину"
+  else
+    fail "сообщение: $(cat "$WORK/out26")"
+  fi
+fi
+dry_nomerge="$(cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason "работа уже в main" --dry-run 2>&1)"
+if [[ "$dry_nomerge" == *"слияния не будет"* && "$dry_nomerge" == *"работа уже в main"* ]]; then
+  pass "dry-run честно говорит, что слияния не будет"
+else
+  fail "dry-run в режиме --no-merge: $dry_nomerge"
+fi
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason "работа уже в main: правки в 9c213a0" >"$WORK/out27" 2>&1 ); then
+  if grep -q '^status: merged' "$nomerge_repo/.kanban/tasks/001.md" && grep -q "закрыто без слияния" "$nomerge_repo/.kanban/tasks/001.md"; then
+    pass "--no-merge закрывает карточку и пишет причину"
+  else
+    fail "статус или причина в карточке не записаны"
+  fi
+  if [[ -z "$(git -C "$nomerge_repo" log --merges --oneline)" ]]; then
+    pass "при --no-merge слияния не было"
+  else
+    fail "появился merge-коммит"
+  fi
+else
+  fail "--no-merge упал: $(cat "$WORK/out27")"
+fi
+
+branch_repo="$WORK/branchguess"
+make_repo "$branch_repo"
+( cd "$branch_repo" && ./bin/task-new.sh "Обычная задача с веткой" --owner sess-test >/dev/null 2>&1 )
+for step in in-progress in-review testing ready; do
+  ( cd "$branch_repo/worktrees/001" && ./bin/task-move.sh 001 "$step" --owner sess-test --role worker >/dev/null 2>&1 )
+done
+if ( cd "$branch_repo" && ./bin/task-commit.sh 001 --no-merge --reason "проверка" >"$WORK/out28" 2>&1 ); then
+  fail "--no-merge не должен работать при существующей ветке"
+else
+  if grep -q "существует" "$WORK/out28"; then
+    pass "--no-merge отвергает существующую ветку задачи"
+  else
+    fail "сообщение: $(cat "$WORK/out28")"
+  fi
+fi
+
 echo "== расход токенов и защита от перехвата задачи"
 usage_home="$WORK/usage-home"
 mkdir -p "$usage_home/storages/session_projcache/sessions"

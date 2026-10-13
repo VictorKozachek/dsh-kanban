@@ -16,6 +16,13 @@
 #
 # Использование:
 #   bin/task-commit.sh <id> [--message ТЕКСТ] [--branch ВЕТКА] [--dry-run]
+#   bin/task-commit.sh <id> --no-merge --reason "почему слияния нет" [--dry-run]
+#
+# Режим --no-merge — для задачи, работа по которой уже в основной ветке (например,
+# инфраструктура набора: правки шли прямо в main, ветки task/<id> не было). Он
+# закрывает карточку в merged БЕЗ слияния, но требует причину: она пишется в
+# карточку, чтобы «закрыто без слияния» нельзя было сделать молча. Если ветка
+# задачи существует, режим отказывает: это обычное слияние.
 #
 # Запускается из ОСНОВНОГО чекаута: слияние ветки задачи делается там.
 #
@@ -32,13 +39,16 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then usage; exit 0; fi
 if [[ $# -lt 1 ]]; then usage >&2; exit 2; fi
 
 id="${1#\#}"; shift
-MESSAGE=""; BRANCH=""; DRY_RUN=0
+MESSAGE=""; BRANCH=""; DRY_RUN=0; NO_MERGE=0; REASON=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --message) MESSAGE="${2:?--message требует значения}"; shift 2 ;;
     --message=*) MESSAGE="${1#*=}"; shift ;;
     --branch) BRANCH="${2:?--branch требует значения}"; shift 2 ;;
     --branch=*) BRANCH="${1#*=}"; shift ;;
+    --no-merge) NO_MERGE=1; shift ;;
+    --reason) REASON="${2:?--reason требует значения}"; shift 2 ;;
+    --reason=*) REASON="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
@@ -123,6 +133,33 @@ card="$(read_card)" || {
   exit 1
 }
 
+# Ветка задачи: обычному режиму она нужна, режиму --no-merge — наоборот, мешает.
+branch_exists() {
+  git -C "$ROOT" show-ref --verify --quiet "refs/heads/$BRANCH" || [[ -n "$(worktree_for_branch "$BRANCH")" ]]
+}
+
+if (( NO_MERGE == 1 )); then
+  if [[ -z "$REASON" ]]; then
+    cat >&2 <<'MSG'
+--no-merge требует --reason: режим закрывает карточку, работа по которой уже в
+основной ветке, и причина нужна в карточке — иначе это молчаливый обход слияния.
+
+  bin/task-commit.sh <id> --no-merge --reason "почему слияния нет"
+MSG
+    exit 2
+  fi
+  if branch_exists; then
+    echo "ветка $BRANCH существует: это обычное слияние, а не «работа уже в main»" >&2
+    echo "уберите --no-merge и слейте как обычно" >&2
+    exit 1
+  fi
+elif ! branch_exists; then
+  echo "ветки $BRANCH нет: сливать нечего" >&2
+  echo "если работа по задаче уже в основной ветке, закройте карточку так:" >&2
+  echo "  bin/task-commit.sh $id --no-merge --reason \"почему слияния нет\"" >&2
+  exit 1
+fi
+
 main_card="$ROOT/.kanban/tasks/$id.md"
 if [[ -f "$main_card" ]] && [[ "$(field_of status < "$main_card")" == "merged" ]]; then
   echo "задача $id уже влита (карточка в основном чекауте в статусе merged)" >&2
@@ -153,6 +190,12 @@ target="$(git -C "$ROOT" symbolic-ref --short -q HEAD || echo main)"
 
 if (( DRY_RUN == 1 )); then
   echo "ветка задачи: $BRANCH"
+  if (( NO_MERGE == 1 )); then
+    echo "режим: --no-merge, слияния не будет (ветки нет)"
+    echo "причина: $REASON"
+  else
+    echo "режим: слияние в $target"
+  fi
   echo "короткое имя: $short"
   echo "целевая ветка: $target"
   echo "сообщение коммита:"
@@ -161,13 +204,13 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
-if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+if (( NO_MERGE == 0 )) && [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
   echo "рабочий каталог не чист: слияние может запутаться. Закоммитьте или уберите изменения:" >&2
   git -C "$ROOT" status --short >&2
   exit 1
 fi
 
-if ! git -C "$ROOT" merge --no-ff "$BRANCH" -m "$subject" -m "$body"; then
+if (( NO_MERGE == 0 )) && ! git -C "$ROOT" merge --no-ff "$BRANCH" -m "$subject" -m "$body"; then
   echo "слияние не прошло: развязывайте конфликт вручную, карточка осталась в ready" >&2
   exit 1
 fi
@@ -175,12 +218,21 @@ fi
 # Статус карточки меняется после слияния: карточка уже в основной ветке, и
 # task-move.sh коммитит только её. --force здесь штатный: переход ready → merged
 # разрешён ровно одному вызывающему — этому скрипту.
-if ! "$ROOT/bin/task-move.sh" "$id" merged --role dispatcher --force; then
-  echo "слияние прошло, но статус merged не записан: поставьте его вручную" >&2
+move_args=("$id" merged --role dispatcher --force)
+if (( NO_MERGE == 1 )); then
+  move_args+=(--note "закрыто без слияния: $REASON")
+fi
+if ! "$ROOT/bin/task-move.sh" "${move_args[@]}"; then
+  echo "статус merged не записан: поставьте его вручную" >&2
   exit 1
 fi
 
 echo
-echo "задача $id: $subject"
-echo "пуш делает человек, когда все задачи готовы и закоммичены:"
-echo "  git push <remote> $target"
+if (( NO_MERGE == 1 )); then
+  echo "задача $id закрыта без слияния: $REASON"
+  echo "ветки $BRANCH не было — в основную ветку ничего не вливалось, коммита нет."
+else
+  echo "задача $id: $subject"
+  echo "пуш делает человек, когда все задачи готовы и закоммичены:"
+  echo "  git push <remote> $target"
+fi
