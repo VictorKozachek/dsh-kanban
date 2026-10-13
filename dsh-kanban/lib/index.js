@@ -29,7 +29,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { planNotices, snapshotCards } from "./watcher-core.js";
+import { deliveryKey, planNotices, snapshotCards } from "./watcher-core.js";
 
 /** Сервис, которым GUI отправляет сообщение в сессию. */
 export const inject = ["sessionController"];
@@ -69,11 +69,6 @@ function readSnapshot(tasksDir) {
     }
   }
   return snapshotCards(entries);
-}
-
-/** Ключ доставки: одна версия карточки в одном статусе объявляется один раз. */
-function deliveryKey(cardId, status, updated) {
-  return `${cardId}:${status}:${updated ?? ""}`;
 }
 
 function loadState(file) {
@@ -157,7 +152,7 @@ export function apply(ctx, config = {}) {
           return;
         }
         for (const item of notices) {
-          const key = deliveryKey(item.cardId, item.status, next.get(item.cardId)?.updated);
+          const key = deliveryKey(next.get(item.cardId), item.status);
           if (state[key]) continue;
           void deliver(ctx, item).then((accepted) => {
             if (!accepted) return;

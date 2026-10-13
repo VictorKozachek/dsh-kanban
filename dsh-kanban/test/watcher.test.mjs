@@ -4,7 +4,7 @@
  * Запуск: node dsh-kanban/test/watcher.test.mjs
  */
 import assert from "node:assert/strict";
-import { parseCard, planNotices, snapshotCards } from "../lib/watcher-core.js";
+import { deliveryKey, parseCard, planNotices, snapshotCards } from "../lib/watcher-core.js";
 
 let failed = 0;
 let passed = 0;
@@ -63,6 +63,19 @@ check("карточка без id помечается сломанной", () =
 check("README и не-markdown в снимок не попадают", () => {
   const shot = snapshotCards([["README.md", "# Доска"], ["notes.txt", "x"], ["007.md", card("007", "todo")]]);
   assert.deepEqual([...shot.keys()], ["007"]);
+});
+
+check("updated читается: он отличает повторный заход в тот же статус", () => {
+  const first = parseCard('---\nid: "007"\nstatus: in-review\nupdated: 2026-10-13T14:00:00Z\n---\n');
+  assert.equal(first.updated, "2026-10-13T14:00:00Z");
+});
+check("ключ доставки различает версии карточки и совпадает для одной версии", () => {
+  const first = parseCard('---\nid: "007"\nstatus: in-review\nupdated: 14:00\n---\n');
+  const second = parseCard('---\nid: "007"\nstatus: in-review\nupdated: 15:00\n---\n');
+  const sameAgain = parseCard('---\nid: "007"\nstatus: in-review\nupdated: 14:00\n---\n');
+  assert.equal(deliveryKey(first, "in-review"), deliveryKey(sameAgain, "in-review"));
+  assert.notEqual(deliveryKey(first, "in-review"), deliveryKey(second, "in-review"));
+  assert.notEqual(deliveryKey(first, "in-review"), deliveryKey(first, "testing"));
 });
 
 console.log("== правила нарядов");
