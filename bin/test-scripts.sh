@@ -311,6 +311,55 @@ else
   fail "владелец с кавычкой не смог взять карточку"
 fi
 
+reassign_repo="$WORK/reassign"
+make_repo "$reassign_repo"
+( cd "$reassign_repo" && ./bin/task-new.sh "Переназначение" --owner sess-A >/dev/null 2>&1 )
+if ( cd "$reassign_repo/worktrees/001" && ./bin/task-move.sh 001 todo --owner sess-B >"$WORK/out25" 2>&1 ); then
+  fail "переназначение без --force не должно проходить"
+else
+  if grep -q "владелец меняется только" "$WORK/out25"; then
+    pass "переназначение без --force отвергнуто"
+  else
+    fail "сообщение: $(cat "$WORK/out25")"
+  fi
+fi
+if ( cd "$reassign_repo/worktrees/001" && ./bin/task-move.sh 001 todo --owner sess-B --force >/dev/null 2>&1 ) &&
+   grep -q '^owner: sess-B' "$reassign_repo/worktrees/001/.kanban/tasks/001.md"; then
+  pass "--force переназначает задачу другой сессии"
+else
+  fail "переназначение через --force не сработало"
+fi
+
+blocked_repo="$WORK/blocked"
+make_repo "$blocked_repo"
+( cd "$blocked_repo" && ./bin/task-new.sh "Блокировка" --owner sess-owner >/dev/null 2>&1 )
+( cd "$blocked_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-owner --role worker >/dev/null 2>&1 )
+( cd "$blocked_repo/worktrees/001" && ./bin/task-move.sh 001 blocked --note "ждём человека" >/dev/null 2>&1 )
+if ( cd "$blocked_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-thief >"$WORK/out26" 2>&1 ); then
+  fail "чужак не должен снимать блокировку"
+else
+  if grep -q "закреплена за sess-owner" "$WORK/out26"; then
+    pass "снятие чужой блокировки отвергнуто"
+  else
+    fail "сообщение: $(cat "$WORK/out26")"
+  fi
+fi
+if ( cd "$blocked_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-owner >/dev/null 2>&1 ); then
+  pass "владелец снимает блокировку"
+else
+  fail "владелец не смог снять блокировку"
+fi
+
+space_repo="$WORK/space"
+make_repo "$space_repo"
+mkdir -p "$space_repo/.kanban/tasks"
+printf -- '---\nid: "001"\ntitle: Пробел в статусе\nstatus: "todo "\nowner: sess-owner\nupdated: ""\n---\n' > "$space_repo/.kanban/tasks/001.md"
+if ( cd "$space_repo" && ./bin/task-move.sh 001 in-progress --owner sess-thief >/dev/null 2>&1 ); then
+  fail "статус с хвостовым пробелом не должен обходить guard"
+else
+  pass "хвостовой пробел в статусе больше не обходит guard"
+fi
+
 merged_repo="$WORK/merged"
 make_repo "$merged_repo"
 mkdir -p "$merged_repo/.kanban/tasks"
