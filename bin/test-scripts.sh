@@ -535,6 +535,13 @@ if grep -q '^tokens_worker: 6000' "$guard_card"; then pass "расход рол�
 if grep -q '^tokens: 6000' "$guard_card"; then pass "суммарный расход посчитан"; else fail "tokens: $(grep '^tokens:' "$guard_card")"; fi
 if grep -q '^since: ' "$guard_card"; then pass "метка since записана"; else fail "since не записан"; fi
 
+echo "== набор совпадает с проектом-источником"
+if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
+  pass "$(head -1 "$WORK/out40")"
+else
+  fail "$(tr '\n' '; ' < "$WORK/out40")"
+fi
+
 echo "== пресеты ролей: генерация строк и установка в патч-слой профиля"
 preset_home="$WORK/preset-home"
 mkdir -p "$preset_home/profiles/demo"
