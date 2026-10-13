@@ -157,9 +157,9 @@ const plugin = entry.factory((name) => {
 const TASKS = {
   ".kanban/worktrees.json": JSON.stringify({ version: 1, cards: ["/tmp/awg-t002/.kanban/tasks/002.md"] }),
   ".kanban/tasks/001.md": "---\nid: 001\ntitle: Скелет плагина\nstatus: merged\nupdated: 2026-09-23T14:00:00Z\n---\n",
-  ".kanban/tasks/003.md": "---\nid: 003\ntitle: Пресеты агентов\nstatus: in-progress\nupdated: 2026-09-23T15:12:00Z\n---\n",
+  ".kanban/tasks/003.md": "---\nid: 003\ntitle: Пресеты агентов\nstatus: in-progress\ntokens: \"0\"\nupdated: 2026-09-23T15:12:00Z\n---\n",
   ".kanban/tasks/005.md":
-    "---\nid: 005\ntitle: Инсталлятор пресетов\nstatus: ready\nowner: session-1a2b3c4d-77f0\nrole: reviewer\ntokens: 6000\ntokens_reviewer: 6000\nbranch: task/005\nupdated: 2026-09-23T15:31:00Z\n" +
+    "---\nid: 005\ntitle: Инсталлятор пресетов\nstatus: ready\nowner: session-1a2b3c4d-77f0\nrole: reviewer\ntokens: 6000\ntokens_reviewer: 6000\nbranch: task/005\nsince: 2026-09-23T15:31:00Z\nupdated: 2026-09-23T15:31:00Z\n" +
     "note: \"" + "Длинный отчёт о прогоне. ".repeat(20) + "\"\n---\n",
   "/tmp/awg-t002/.kanban/tasks/002.md":
     "---\nid: 002\ntitle: Колонки и карточки\nstatus: in-progress\nowner: session-71bd0c3e-4a92\nbranch: task/002\nupdated: 2026-09-23T15:40:00Z\n---\n"
@@ -287,6 +287,11 @@ assert.ok(text.includes("#005"), "третья карточка не отрис�
 assert.ok(text.includes("в ветке"), "нет значка «в ветке» у карточек из worktree");
 assert.ok(text.includes("ревьювер"), "нет подписи роли на карточке");
 assert.ok(text.includes("токенов: 6,0k"), "нет строки расхода токенов");
+assert.ok(
+  JSON.stringify(tree).includes("reviewer · с 2026-09-23T15:31:00Z"),
+  "в подсказке чипа роли нет времени роли"
+);
+assert.ok(!text.includes("токенов: 0"), "нулевой расход не должен давать строку «токенов: 0»");
 assert.ok(!text.includes("в ветке | #001") && !text.includes("#001 | в ветке"), "слитая карточка не должна иметь значок");
 assert.ok(text.includes("session-71bd…"), "чип владельца не отрисован или не обрезан по правилу");
 // Порядок в дереве — по колонкам, внутри колонки — по id.

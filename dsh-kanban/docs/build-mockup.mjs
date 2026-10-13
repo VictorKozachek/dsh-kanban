@@ -36,10 +36,28 @@ const { styles, COLUMNS } = plugin.__internals;
 /** camelCase → kebab-case, чтобы отдать объект стилей в inline-атрибут. */
 const kebab = (name) => name.replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase());
 
+/** Свойства, у которых число не требует единиц измерения. */
+const UNITLESS = new Set([
+  "lineHeight",
+  "opacity",
+  "zIndex",
+  "flex",
+  "flexGrow",
+  "flexShrink",
+  "order",
+  "fontWeight",
+  "zoom"
+]);
+
 /** Объект инлайн-стилей → строка для атрибута style. */
 function css(style) {
   return Object.entries(style || {})
-    .map(([key, value]) => `${kebab(key)}:${value}`)
+    .map(([key, value]) => {
+      // В таблице стилей плагина числа значат пиксели (width: 232, gap: 3), а в
+      // атрибуте style без единиц они невалидны: браузер такие свойства отбросит.
+      const pixels = typeof value === "number" && !UNITLESS.has(key);
+      return `${kebab(key)}:${pixels ? `${value}px` : value}`;
+    })
     .join(";");
 }
 
@@ -49,8 +67,8 @@ const escapeHtml = (text) =>
 /** Демонстрационные карточки: правдоподобная работа по этому же проекту. */
 const CARDS = [
   { id: "001", title: "Скелет плагина dsh-kanban", status: "merged", owner: "session-4f8c1a20-9e11", role: "dispatcher", tokens: 2100000, branch: "task/001", updated: "2026-09-23T14:02:11Z", note: "влито в main" },
-  { id: "002", title: "Колонки, карточки и опрос .kanban/tasks", status: "in-progress", owner: "session-71bd0c3e-4a92", role: "worker", tokens: 1840000, branch: "task/002", updated: "2026-09-23T15:40:02Z" },
-  { id: "003", title: "Пресеты dispatcher / worker / verifier", status: "in-review", owner: "session-1a2b3c4d-77f0", role: "reviewer", tokens: 1240000, branch: "task/003", updated: "2026-09-23T15:12:44Z", note: "ревью: смотреть диф плагина" },
+  { id: "002", title: "Колонки, карточки и опрос .kanban/tasks", status: "in-progress", owner: "session-71bd0c3e-4a92", role: "worker", tokens: 1840000, branch: "task/002", updated: "2026-09-23T15:40:02Z", since: "2026-09-23T15:40:02Z" },
+  { id: "003", title: "Пресеты dispatcher / worker / verifier", status: "in-review", owner: "session-1a2b3c4d-77f0", role: "reviewer", tokens: 1240000, branch: "task/003", updated: "2026-09-23T15:12:44Z", since: "2026-09-23T15:12:44Z", note: "ревью: смотреть диф плагина" },
   { id: "004", title: "Тесты парсера карточек в Node", status: "testing", owner: "session-71bd0c3e-4a92", role: "verifier", tokens: 860000, branch: "task/004", updated: "2026-09-23T15:55:19Z", note: "сдано: 12/12 проверок, нужен независимый прогон" },
   { id: "005", title: "Инсталлятор пресетов", status: "ready", owner: "session-1a2b3c4d-77f0", role: "verifier", tokens: 1420000, branch: "task/005", updated: "2026-09-23T15:31:07Z", note: "проверено: YAML валиден, персона на месте" },
   { id: "006", title: "Проверить активацию в живом GUI", status: "blocked", owner: "session-4f8c1a20-9e11", role: "worker", tokens: 540000, updated: "2026-09-23T15:58:40Z", note: "ждём перезапуск dsh web" },
@@ -83,6 +101,11 @@ function formatTokens(value) {
   return short(number / 1000000000, "G");
 }
 
+/** Есть ли расход: ноль и пустое значение — это отсутствие данных. */
+function hasTokens(card) {
+  return Number(String(card.tokens ?? "").replace(/\s+/g, "")) > 0;
+}
+
 /** Разметка одной карточки — структура повторяет компонент Card из плагина. */
 function cardHtml(card) {
   const column = COLUMNS.find((item) => item.id === normalizeStatus(card.status)) || COLUMNS[0];
@@ -91,7 +114,11 @@ function cardHtml(card) {
   const parts = [
     `<div style="${css(styles.cardTop)}">`,
     `<span style="${css(styles.cardId)}">#${escapeHtml(card.id)}</span>`,
-    role ? `<span style="${css(styles.roleBadge)}" title="${escapeHtml(card.role)}">${escapeHtml(role)}</span>` : "",
+    role
+      ? `<span style="${css(styles.roleBadge)}" title="${escapeHtml(
+          card.since ? `${card.role} · с ${card.since}` : card.role
+        )}">${escapeHtml(role)}</span>`
+      : "",
     card.owner
       ? `<span style="${css(styles.owner)}" title="${escapeHtml(card.owner)}">${escapeHtml(shortOwner(card.owner))}</span>`
       : `<span style="${css(styles.ownerEmpty)}">не назначен</span>`,
@@ -99,7 +126,7 @@ function cardHtml(card) {
     `<div style="${css(styles.cardTitle)}">${escapeHtml(card.title)}</div>`
   ];
   if (card.branch) parts.push(`<div style="${css(styles.meta)}">${escapeHtml(card.branch)}</div>`);
-  if (card.tokens) {
+  if (hasTokens(card)) {
     parts.push(
       `<div style="${css(styles.meta)}" title="${escapeHtml(String(card.tokens))}">токенов: ${escapeHtml(formatTokens(card.tokens))}</div>`
     );

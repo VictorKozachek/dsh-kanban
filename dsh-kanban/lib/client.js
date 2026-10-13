@@ -435,6 +435,11 @@ window.__ModuleLoader__.load({
     };
 
     /** Подпись роли: известные роли берём из словаря, незнакомую показываем как записана. */
+    /** Есть ли расход: ноль и пустое значение — это отсутствие данных. */
+    function hasTokens(card) {
+      return Number(String(card.tokens || "").replace(/\s+/g, "")) > 0;
+    }
+
     function roleLabel(role, t) {
       const value = String(role || "").trim().toLowerCase();
       if (value === "") return "";
@@ -478,7 +483,7 @@ window.__ModuleLoader__.load({
         h("div", { key: "title", style: styles.cardTitle }, card.title)
       ];
       if (card.branch) children.push(h("div", { key: "branch", style: styles.meta }, card.branch));
-      if (card.tokens) {
+      if (hasTokens(card)) {
         const breakdown = Object.entries(card.usage || {})
           .map(([role, value]) => role + ": " + formatTokens(value))
           .join("; ");

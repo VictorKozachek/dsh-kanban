@@ -67,6 +67,15 @@ def role_label_of(card):
     return ROLE_LABELS.get(role, role)
 
 
+def has_tokens(card):
+    """Есть ли расход: ноль и пустое значение — это отсутствие данных."""
+    value = str(card.get("tokens") or "").replace(" ", "")
+    try:
+        return int(value) > 0
+    except ValueError:
+        return False
+
+
 def format_tokens(value):
     """Компактная запись числа — как formatTokens в плагине."""
     try:
@@ -421,7 +430,10 @@ def build_board(styles, columns, theme, cards, header_width):
                 right = x + body_pad + inner_w - card_pad[1]
                 # В плагине чип владельца ужимает flex (max-width плюс ellipsis);
                 # здесь считаем остаток строки явно, чтобы макет не разъезжался.
-                label = ellipsize(label, right - cursor - 12)
+                # В плагине у чипа владельца есть max-width и ellipsis; держим
+                # тот же предел, иначе длинный id в макете шире, чем на доске.
+                owner_max = (num(styles["owner"].get("maxWidth"), 110) - 12) * SCALE
+                label = ellipsize(label, min(right - cursor - 12, owner_max))
                 if label:
                     chip_w = owner_chip_width(label)
                     chip_h = small_font.size / SCALE * LINE_FACTOR + 4
@@ -438,7 +450,7 @@ def build_board(styles, columns, theme, cards, header_width):
                 ty += card_gap
                 canvas.text(tx, ty, card["branch"], small_font, composite(text, 0.6, card_bg))
                 ty += small_font.size / SCALE * LINE_FACTOR
-            if card.get("tokens"):
+            if has_tokens(card):
                 ty += card_gap
                 canvas.text(tx, ty, "токенов: " + format_tokens(card["tokens"]), small_font,
                             composite(text, 0.6, card_bg))
