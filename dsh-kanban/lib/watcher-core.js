@@ -156,5 +156,11 @@ export function planNotices(previous, next, options = {}) {
     }
   }
 
+  // Наряд несёт статус карточки: по нему сторож отмечает доставку, чтобы не
+  // повторять один и тот же наряд при перезапуске.
+  for (const item of notices) {
+    item.status = next.get(item.cardId)?.status ?? "";
+  }
+
   return notices;
 }

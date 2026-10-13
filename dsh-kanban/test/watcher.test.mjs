@@ -180,5 +180,29 @@ check("несколько карточек — наряды по каждой", 
   );
 });
 
+check("наряд несёт статус карточки", () => {
+  const notices = planNotices(
+    snapshot([["007", "in-progress", { owner: "sess-worker" }]]),
+    snapshot([["007", "in-review", { owner: "sess-worker" }]]),
+    ROLES
+  );
+  assert.equal(notices[0].status, "in-review");
+});
+check("стартовый снимок: ждущие роль карточки дают наряды, остальные — нет", () => {
+  const initial = snapshot([
+    ["007", "in-review", { owner: "sess-worker" }],
+    ["008", "testing", { owner: "sess-worker" }],
+    ["009", "ready", { owner: "sess-worker" }],
+    ["010", "todo"],
+    ["011", "in-progress", { owner: "sess-worker" }],
+    ["012", "merged"]
+  ]);
+  const notices = planNotices(new Map(), initial, ROLES);
+  assert.deepEqual(
+    notices.map((item) => [item.cardId, item.kind]),
+    [["007", "review"], ["008", "test"], ["009", "merge"]]
+  );
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 if (failed > 0) process.exit(1);
