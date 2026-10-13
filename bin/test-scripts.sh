@@ -240,6 +240,42 @@ else
     fail "сообщение: $(cat "$WORK/out26")"
   fi
 fi
+# Забытое значение не должно съедать следующий флаг: --dry-run обязан остаться флагом.
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason --dry-run >"$WORK/out33" 2>&1 ); then
+  fail "забытое значение --reason не должно закрывать карточку"
+else
+  if grep -q "похоже, текст забыт" "$WORK/out33"; then
+    pass "забытое значение --reason отвергнуто"
+  else
+    fail "сообщение: $(cat "$WORK/out33")"
+  fi
+fi
+if grep -q '^status: ready' "$nomerge_repo/.kanban/tasks/001.md"; then
+  pass "после отказа карточка осталась в ready"
+else
+  fail "статус: $(grep '^status:' "$nomerge_repo/.kanban/tasks/001.md")"
+fi
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --message --dry-run >"$WORK/out34" 2>&1 ); then
+  fail "--message с забытым значением не должен сливать"
+else
+  if grep -q "похоже, текст забыт" "$WORK/out34"; then
+    pass "--message с забытым значением отвергнут"
+  else
+    fail "сообщение: $(cat "$WORK/out34")"
+  fi
+fi
+# Контроль: форма ФЛАГ=ЗНАЧЕНИЕ пропускает значение, начинающееся с дефиса.
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason=--dry-run --dry-run >"$WORK/out35" 2>&1 ); then
+  if grep -q "слияния не будет" "$WORK/out35" && grep -q "причина: --dry-run" "$WORK/out35" &&
+     grep -q '^status: ready' "$nomerge_repo/.kanban/tasks/001.md"; then
+    pass "значение с дефисом проходит формой ФЛАГ=ЗНАЧЕНИЕ"
+  else
+    fail "контроль: $(cat "$WORK/out35")"
+  fi
+else
+  fail "контроль упал: $(cat "$WORK/out35")"
+fi
+
 dry_nomerge="$(cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason "работа уже в main" --dry-run 2>&1)"
 if [[ "$dry_nomerge" == *"слияния не будет"* && "$dry_nomerge" == *"работа уже в main"* && "$dry_nomerge" != *"сообщение коммита"* ]]; then
   pass "dry-run честно говорит, что слияния не будет"

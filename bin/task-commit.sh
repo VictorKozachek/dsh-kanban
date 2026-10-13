@@ -24,6 +24,10 @@
 # карточку, чтобы «закрыто без слияния» нельзя было сделать молча. Если ветка
 # задачи существует, режим отказывает: это обычное слияние.
 #
+# Значение, начинающееся с дефиса, пишется формой ФЛАГ=ЗНАЧЕНИЕ. Иначе забытый
+# текст съедает следующий флаг: `--reason --dry-run` закрыл бы задачу по-настоящему,
+# а `--message --dry-run` сделал бы коммит с сообщением «--dry-run».
+#
 # Запускается из ОСНОВНОГО чекаута: слияние ветки задачи делается там.
 #
 set -euo pipefail
@@ -38,13 +42,28 @@ usage() {
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then usage; exit 0; fi
 if [[ $# -lt 1 ]]; then usage >&2; exit 2; fi
 
+# Значение отдельным аргументом не должно начинаться с дефиса: иначе забытый
+# текст съедает следующий флаг, и опасный режим срабатывает по-настоящему.
+require_value() {
+  local flag="$1" value="${2-}"
+  if [[ "$value" == -* ]]; then
+    echo "$flag: значение начинается с «-» — похоже, текст забыт." >&2
+    echo "если значение правда начинается с дефиса, пишите $flag=ЗНАЧЕНИЕ" >&2
+    exit 2
+  fi
+}
+
 id="${1#\#}"; shift
 MESSAGE=""; BRANCH=""; DRY_RUN=0; NO_MERGE=0; REASON=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --message) MESSAGE="${2:?--message требует значения}"; shift 2 ;;
+    --message)
+      if [[ $# -lt 2 ]]; then echo "--message требует значения" >&2; exit 2; fi
+      require_value --message "$2"; MESSAGE="$2"; shift 2 ;;
     --message=*) MESSAGE="${1#*=}"; shift ;;
-    --branch) BRANCH="${2:?--branch требует значения}"; shift 2 ;;
+    --branch)
+      if [[ $# -lt 2 ]]; then echo "--branch требует значения" >&2; exit 2; fi
+      require_value --branch "$2"; BRANCH="$2"; shift 2 ;;
     --branch=*) BRANCH="${1#*=}"; shift ;;
     --no-merge) NO_MERGE=1; shift ;;
     --reason)
@@ -52,7 +71,7 @@ while [[ $# -gt 0 ]]; do
         echo "--reason требует значения" >&2
         exit 2
       fi
-      REASON="$2"; shift 2 ;;
+      require_value --reason "$2"; REASON="$2"; shift 2 ;;
     --reason=*) REASON="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
