@@ -276,6 +276,54 @@ if grep -q '^status: in-progress' "$return_card"; then pass "карточка в
 if grep -q '^owner: sess-worker' "$return_card"; then pass "владелец остался исполнителем"; else fail "owner: $(grep '^owner:' "$return_card")"; fi
 if grep -q '^role: worker' "$return_card"; then pass "роль снова worker"; else fail "role: $(grep '^role:' "$return_card")"; fi
 if grep -q '^tokens_reviewer: ' "$return_card"; then pass "расход ревьювера записан"; else fail "нет tokens_reviewer"; fi
+
+echo "== выдача задач: перезапись владельца, fallback и порядок проверок"
+owner_repo="$WORK/owner"
+make_repo "$owner_repo"
+( cd "$owner_repo" && ./bin/task-new.sh "Закреплённая задача" --owner sess-owner >/dev/null 2>&1 )
+if ( cd "$owner_repo/worktrees/001" && ./bin/task-move.sh 001 todo --owner sess-thief >"$WORK/out23" 2>&1 ); then
+  fail "чужой владелец не должен переписываться"
+else
+  if grep -q "владелец меняется только" "$WORK/out23"; then
+    pass "смена владельца чужой карточки отвергнута"
+  else
+    fail "сообщение: $(cat "$WORK/out23")"
+  fi
+fi
+if ( cd "$owner_repo/worktrees/001" && ./bin/task-move.sh 001 todo --owner sess-owner >/dev/null 2>&1 ); then
+  pass "владелец переписывает свой owner без --force"
+else
+  fail "владелец не смог переписать свой owner"
+fi
+if ( cd "$owner_repo/worktrees/001" && DSH_SESSION_ID=sess-owner ./bin/task-move.sh 001 in-progress >/dev/null 2>&1 ); then
+  pass "взятие задачи по \$DSH_SESSION_ID без --owner"
+else
+  fail "fallback на \$DSH_SESSION_ID не сработал"
+fi
+
+quoted_repo="$WORK/quoted"
+make_repo "$quoted_repo"
+( cd "$quoted_repo" && ./bin/task-new.sh "Кавычка в owner" >/dev/null 2>&1 )
+( cd "$quoted_repo/worktrees/001" && ./bin/task-move.sh 001 todo --owner 'a"b' >/dev/null 2>&1 )
+if ( cd "$quoted_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner 'a"b' >/dev/null 2>&1 ); then
+  pass "owner с кавычкой читается после снятия экранирования"
+else
+  fail "владелец с кавычкой не смог взять карточку"
+fi
+
+merged_repo="$WORK/merged"
+make_repo "$merged_repo"
+mkdir -p "$merged_repo/.kanban/tasks"
+printf -- '---\nid: "001"\ntitle: Слитая\nstatus: merged\nowner: ""\nupdated: ""\n---\n' > "$merged_repo/.kanban/tasks/001.md"
+if ( cd "$merged_repo" && ./bin/task-move.sh 001 in-progress >"$WORK/out24" 2>&1 ); then
+  fail "merged → in-progress не должен проходить"
+else
+  if grep -q "недопустимый переход: merged → in-progress" "$WORK/out24"; then
+    pass "сначала проверяется переход, потом владелец"
+  else
+    fail "сообщение: $(cat "$WORK/out24")"
+  fi
+fi
 if ( cd "$guard_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-other >"$WORK/out13" 2>&1 ); then
   fail "чужую закреплённую задачу брать нельзя"
 else
