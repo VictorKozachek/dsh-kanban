@@ -241,7 +241,7 @@ else
   fi
 fi
 dry_nomerge="$(cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason "работа уже в main" --dry-run 2>&1)"
-if [[ "$dry_nomerge" == *"слияния не будет"* && "$dry_nomerge" == *"работа уже в main"* ]]; then
+if [[ "$dry_nomerge" == *"слияния не будет"* && "$dry_nomerge" == *"работа уже в main"* && "$dry_nomerge" != *"сообщение коммита"* ]]; then
   pass "dry-run честно говорит, что слияния не будет"
 else
   fail "dry-run в режиме --no-merge: $dry_nomerge"
@@ -261,6 +261,34 @@ else
   fail "--no-merge упал: $(cat "$WORK/out27")"
 fi
 
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --reason "не к месту" >"$WORK/out29" 2>&1 ); then
+  fail "--reason без --no-merge не должен проходить"
+else
+  if grep -q "только с --no-merge" "$WORK/out29"; then
+    pass "--reason без --no-merge отвергнут"
+  else
+    fail "сообщение: $(cat "$WORK/out29")"
+  fi
+fi
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason "" >"$WORK/out30" 2>&1 ); then
+  fail "пустая причина не должна проходить"
+else
+  if grep -q "требует --reason" "$WORK/out30"; then
+    pass "пустая причина отвергнута без bash-ошибки"
+  else
+    fail "сообщение: $(cat "$WORK/out30")"
+  fi
+fi
+if ( cd "$nomerge_repo" && ./bin/task-commit.sh 001 --no-merge --reason "   " >"$WORK/out31" 2>&1 ); then
+  fail "причина из пробелов не должна проходить"
+else
+  if grep -q "требует --reason" "$WORK/out31"; then
+    pass "причина из пробелов отвергнута"
+  else
+    fail "сообщение: $(cat "$WORK/out31")"
+  fi
+fi
+
 branch_repo="$WORK/branchguess"
 make_repo "$branch_repo"
 ( cd "$branch_repo" && ./bin/task-new.sh "Обычная задача с веткой" --owner sess-test >/dev/null 2>&1 )
@@ -275,6 +303,22 @@ else
   else
     fail "сообщение: $(cat "$WORK/out28")"
   fi
+fi
+# --branch не должен прятать нес слитую ветку задачи от проверки.
+if ( cd "$branch_repo" && ./bin/task-commit.sh 001 --no-merge --reason "уже в main" --branch task/опечатка >"$WORK/out32" 2>&1 ); then
+  fail "--branch не должен обходить проверку ветки задачи"
+else
+  if grep -q "task/001 существует" "$WORK/out32"; then
+    pass "--no-merge видит ветку задачи и при чужом --branch"
+  else
+    fail "сообщение: $(cat "$WORK/out32")"
+  fi
+fi
+dry_nomerge_branch="$(cd "$branch_repo" && ./bin/task-commit.sh 001 --no-merge --reason "проверка" --branch task/опечатка --dry-run 2>&1)"
+if [[ "$dry_nomerge_branch" == *"task/001 существует"* ]]; then
+  pass "dry-run тоже видит ветку задачи при чужом --branch"
+else
+  fail "dry-run: $dry_nomerge_branch"
 fi
 
 echo "== расход токенов и защита от перехвата задачи"
