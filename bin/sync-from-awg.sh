@@ -34,12 +34,18 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) CHECK=1; shift ;;
     --from)
-      if (( $# < 2 )); then
+      if (( $# < 2 )) || [[ -z "$2" ]]; then
         echo "--from требует значения: --from DIR (по умолчанию ~/projects/awg)" >&2
         exit 2
       fi
       FROM="$2"; shift 2 ;;
-    --from=*) FROM="${1#*=}"; shift ;;
+    --from=*)
+      FROM="${1#*=}"
+      if [[ -z "$FROM" ]]; then
+        echo "--from требует значения: --from DIR (по умолчанию ~/projects/awg)" >&2
+        exit 2
+      fi
+      shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
   esac

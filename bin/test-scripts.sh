@@ -687,19 +687,21 @@ rm "$sync_src/bin/two.sh"
 # Удаление лишнего делает rsync --delete: без него скрипт предупреждает и копирует
 # без удаления, поэтому проверка не имеет смысла, а не «падает».
 if ! command -v rsync >/dev/null 2>&1; then
-  echo "   пропуск: удаление лишнего требует rsync (его нет в PATH)"
+  echo "   пропуск: удаление лишнего и совпадение после него требуют rsync (его нет в PATH)"
 else
-( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >/dev/null 2>&1 )
-if [[ -f "$sync_dst/bin/two.sh" || -f "$sync_dst/bin/only-here.sh" ]]; then
-  fail "перенос не убрал то, чего нет в источнике"
-else
-  pass "перенос убирает то, чего нет в источнике"
-fi
-fi
-if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >/dev/null 2>&1 ); then
-  pass "после переноса --check видит совпадение"
-else
-  fail "--check не видит совпадение сразу после переноса"
+  ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >/dev/null 2>&1 )
+  if [[ -f "$sync_dst/bin/two.sh" || -f "$sync_dst/bin/only-here.sh" ]]; then
+    fail "перенос не убрал то, чего нет в источнике"
+  else
+    pass "перенос убирает то, чего нет в источнике"
+  fi
+  # Без rsync лишнее осталось бы в приёмнике, и --check честно сказал бы про
+  # расхождение — поэтому и эта проверка относится к сценарию с удалением.
+  if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >/dev/null 2>&1 ); then
+    pass "после переноса --check видит совпадение"
+  else
+    fail "--check не видит совпадение сразу после переноса"
+  fi
 fi
 printf 'правка' >> "$sync_dst/bin/one.sh"
 if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >"$WORK/out42" 2>&1 ); then
@@ -737,6 +739,13 @@ else
   fail "в таблице файлов есть несуществующие пути:$missing"
 fi
 
+code=0
+( cd "$sync_dst" && ./bin/sync-from-awg.sh --from= >"$WORK/out57" 2>&1 ) || code=$?
+if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out57"; then
+  pass "пустой --from= тоже отвергнут"
+else
+  fail "код $code, вывод: $(head -1 "$WORK/out57")"
+fi
 code=0
 ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from >"$WORK/out56" 2>&1 ) || code=$?
 if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out56"; then
