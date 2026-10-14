@@ -325,6 +325,24 @@ else
   fi
 fi
 
+# Пробельное сообщение не должно давать коммит с пустым subject.
+blank_repo="$WORK/blankmessage"
+make_repo "$blank_repo"
+( cd "$blank_repo" && ./bin/task-new.sh "Заголовок из карточки" --owner sess-test >/dev/null 2>&1 )
+for step in in-progress in-review testing ready; do
+  ( cd "$blank_repo/worktrees/001" && ./bin/task-move.sh 001 "$step" --owner sess-test --role worker >/dev/null 2>&1 )
+done
+if ( cd "$blank_repo" && ./bin/task-commit.sh 001 --message="   " >"$WORK/out49" 2>&1 ); then
+  subject="$(git -C "$blank_repo" log --merges -1 --pretty=%s)"
+  if [[ "$subject" == *"Заголовок из карточки"* ]]; then
+    pass "пробельное --message берёт заголовок карточки"
+  else
+    fail "subject: $subject"
+  fi
+else
+  fail "task-commit упал: $(cat "$WORK/out49")"
+fi
+
 branch_repo="$WORK/branchguess"
 make_repo "$branch_repo"
 ( cd "$branch_repo" && ./bin/task-new.sh "Обычная задача с веткой" --owner sess-test >/dev/null 2>&1 )
