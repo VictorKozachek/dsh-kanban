@@ -145,7 +145,6 @@ export function apply(ctx, config = {}) {
       }
 
       const state = loadState(stateFile);
-      const announced = new Map();
       const announce = (before, next) => {
         let notices = [];
         try {
@@ -185,7 +184,6 @@ export function apply(ctx, config = {}) {
         if (next === null) return;
         const before = previous;
         previous = next;
-        announced.clear();
         announce(before, next);
       };
 
