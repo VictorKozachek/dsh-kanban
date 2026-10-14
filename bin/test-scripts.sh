@@ -610,6 +610,37 @@ if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard.patc
 else
   fail "генерация пресетов упала: $(cat "$WORK/out20")"
 fi
+if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard-two-inserts.patch.yml" \
+     --out "$WORK/bad-inserts.yml" >"$WORK/out44" 2>&1; then
+  fail "шаблон с двумя блоками '- insert:' должен быть отвергнут"
+else
+  if grep -q "insert" "$WORK/out44"; then
+    pass "шаблон с двумя блоками '- insert:' отвергнут"
+  else
+    fail "сообщение: $(cat "$WORK/out44")"
+  fi
+fi
+if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard-two-prefixes.patch.yml" \
+     --out "$WORK/bad-prefixes.yml" >"$WORK/out45" 2>&1; then
+  fail "шаблон с двумя персонами должен быть отвергнут"
+else
+  if grep -q "prefix" "$WORK/out45"; then
+    pass "шаблон с двумя персонами отвергнут"
+  else
+    fail "сообщение: $(cat "$WORK/out45")"
+  fi
+fi
+if "$ROOT/bin/gen-role-presets.sh" --out "$WORK/role-presets-check.yml" >"$WORK/out46" 2>&1; then
+  if cmp -s "$WORK/role-presets-check.yml" "$ROOT/presets/role-presets.patch.yml"; then
+    pass "артефакт воспроизводится из встроенного шаблона"
+  else
+    fail "артефакт разошёлся со встроенным шаблоном: перегенерируйте bin/gen-role-presets.sh"
+  fi
+elif grep -q "не нашёл встроенный" "$WORK/out46"; then
+  pass "встроенный шаблон недоступен — воспроизводимость не проверялась"
+else
+  fail "генератор упал: $(cat "$WORK/out46")"
+fi
 if "$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
      --profiles-dir "$preset_home/profiles" --profile demo >"$WORK/out21" 2>&1; then
   if grep -q "preset-worker" "$preset_home/profiles/demo/cordis.patch.yml"; then
@@ -630,6 +661,25 @@ if "$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
 else
   pass "несуществующий профиль даёт понятный отказ"
 fi
+# Недоступный патч-слой: понятное сообщение вместо трейсбека Python.
+mkdir -p "$preset_home/profiles/readonly"
+printf '[]\n' > "$preset_home/profiles/readonly/cordis.patch.yml"
+chmod 444 "$preset_home/profiles/readonly/cordis.patch.yml"
+if "$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+     --profiles-dir "$preset_home/profiles" --profile readonly >"$WORK/out47" 2>&1; then
+  fail "запись в недоступный патч-слой не должна проходить"
+else
+  if grep -q "Traceback" "$WORK/out47"; then
+    fail "установщик напечатал трейсбек вместо сообщения"
+  else
+    if grep -q "не удалось записать" "$WORK/out47"; then
+      pass "недоступный патч-слой даёт понятное сообщение"
+    else
+      fail "сообщение: $(cat "$WORK/out47")"
+    fi
+  fi
+fi
+chmod 644 "$preset_home/profiles/readonly/cordis.patch.yml"
 
 echo "== node без PATH: резолвер bin/node.sh"
 if node_path="$(PATH=/usr/bin:/bin "$ROOT/bin/node.sh" --which 2>/dev/null)" && [[ -x "$node_path" ]]; then

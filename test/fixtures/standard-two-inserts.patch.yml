@@ -1,0 +1,22 @@
+- insert:
+    - id: preset-standard
+      name: "@deepseek-ai/dsh-agent-preset"
+      config:
+        id: standard
+        order: 1
+        plugins:
+          - id: persona
+            name: "@deepseek-ai/dsh-persona"
+            config:
+              prefix: Первая персона.
+- insert:
+    - id: preset-second
+      name: "@deepseek-ai/dsh-agent-preset"
+      config:
+        id: second
+        order: 2
+        plugins:
+          - id: persona
+            name: "@deepseek-ai/dsh-persona"
+            config:
+              prefix: Вторая персона.

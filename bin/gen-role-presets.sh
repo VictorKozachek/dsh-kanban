@@ -96,10 +96,18 @@ personas = Path(os.environ["PERSONAS"])
 out_path = Path(os.environ["OUT"])
 
 body = standard.read_text(encoding="utf-8")
+
+# Форма шаблона проверяется явно: генератор клонирует РОВНО одну строку пресета с
+# одной персоной. Если во встроенном файле появится второй блок или вторая
+# персона, честнее остановиться, чем собрать пресеты с чужим содержимым.
+inserts = body.count("- insert:")
+if inserts != 1:
+    sys.exit(f"в {standard} блоков '- insert:' — {inserts}, а генератор рассчитан на один: форма шаблона изменилась")
 start = body.find("- insert:")
-if start < 0:
-    sys.exit(f"в {standard} нет строки '- insert:'")
 body = body[start:]
+personas_found = list(PREFIX_LINE.finditer(body))
+if len(personas_found) != 1:
+    sys.exit(f"в {standard} строк 'prefix:' у персоны — {len(personas_found)}, а нужна одна: форма шаблона изменилась")
 
 
 def read_meta(directory: Path) -> tuple:
@@ -134,7 +142,7 @@ def build_role(role: str, order: int, name: str, description: str) -> str:
 
     match = PREFIX_LINE.search(text)
     if match is None:
-        sys.exit("в шаблоне нет строки prefix: у персоны")
+        sys.exit(f"в {standard} нет строки prefix: у персоны")
     indent = match.group("indent")
     persona_lines = [
         f'{indent}  {line}'.rstrip()

@@ -74,6 +74,7 @@ command -v python3 >/dev/null 2>&1 || { echo "нужен python3" >&2; exit 1; }
 ROWS="$ROWS" PATCH="$PATCH" python3 - <<'PY'
 import os
 import re
+import sys
 from pathlib import Path
 
 BEGIN = "# >>> пресеты ролей (bin/install-presets.sh) — не правьте вручную"
@@ -104,7 +105,16 @@ else:
         text += "\n" + block
     action = "добавлен"
 
-patch.write_text(text, encoding="utf-8")
+try:
+    patch.write_text(text, encoding="utf-8")
+except OSError as error:
+    print(f"не удалось записать патч-слой {patch}: {error}", file=sys.stderr)
+    print(
+        "профиль лежит вне рабочей директории сессии: запустите установщик из сессии, "
+        "чья рабочая директория — этот профиль, либо с полными правами",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 print(f"{action} блок пресетов ролей: {patch}")
 PY
 
