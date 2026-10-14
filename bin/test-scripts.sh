@@ -333,14 +333,23 @@ for step in in-progress in-review testing ready; do
   ( cd "$blank_repo/worktrees/001" && ./bin/task-move.sh 001 "$step" --owner sess-test --role worker >/dev/null 2>&1 )
 done
 if ( cd "$blank_repo" && ./bin/task-commit.sh 001 --message="   " >"$WORK/out49" 2>&1 ); then
+  fail "пробельное сообщение не должно сливать задачу"
+else
+  if grep -q "состоит из пробелов" "$WORK/out49"; then
+    pass "пробельное --message отвергнуто, как и пробельная причина"
+  else
+    fail "сообщение: $(cat "$WORK/out49")"
+  fi
+fi
+if ( cd "$blank_repo" && ./bin/task-commit.sh 001 --message="" >"$WORK/out52" 2>&1 ); then
   subject="$(git -C "$blank_repo" log --merges -1 --pretty=%s)"
   if [[ "$subject" == *"Заголовок из карточки"* ]]; then
-    pass "пробельное --message берёт заголовок карточки"
+    pass "пустое --message берёт заголовок карточки"
   else
     fail "subject: $subject"
   fi
 else
-  fail "task-commit упал: $(cat "$WORK/out49")"
+  fail "task-commit упал на пустом сообщении: $(cat "$WORK/out52")"
 fi
 
 # Пробельный статус не должен мешать слиянию: task-move.sh его терпит, значит и
