@@ -124,6 +124,9 @@ export function apply(ctx, config = {}) {
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const roles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+    // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
+    const debounceMs = Number.isFinite(config?.debounceMs) ? Number(config.debounceMs) : DEBOUNCE_MS;
+    const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
     if (boards.length === 0) {
       log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards");
       return;
@@ -171,7 +174,7 @@ export function apply(ctx, config = {}) {
           } catch (error) {
             log(ctx, "warn", `не разобрал стартовое состояние доски: ${error?.message ?? error}`);
           }
-        }, CATCH_UP_MS),
+        }, catchUpMs),
       );
 
       // 2. Переходы: следим за каталогом и разбираем изменения.
@@ -189,7 +192,7 @@ export function apply(ctx, config = {}) {
       try {
         const watcher = fs.watch(tasksDir, () => {
           if (timer) clearTimeout(timer);
-          timer = setTimeout(tick, DEBOUNCE_MS);
+          timer = setTimeout(tick, debounceMs);
         });
         watchers.push(watcher);
       } catch (error) {

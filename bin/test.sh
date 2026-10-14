@@ -21,6 +21,7 @@ echo "== логика доски (парсер, слияние с worktree)"
 echo "== рендер доски (регистрация в контексте, колонки, карточки)"
 "$NODE" "$ROOT/dsh-kanban/test/render.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/watcher.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/delivery.test.mjs"
 
 echo "== синтаксис скриптов"
 for file in "$ROOT"/bin/*.sh; do
