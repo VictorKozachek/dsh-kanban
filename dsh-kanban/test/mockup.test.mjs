@@ -36,6 +36,12 @@ fs.cpSync(path.join(plugin, "lib"), path.join(work, "lib"), { recursive: true })
 for (const name of ["build-mockup.mjs", "demo-cards.json"]) {
   fs.copyFileSync(path.join(plugin, "docs", name), path.join(work, "docs", name));
 }
+// Маячок в общем списке: он должен доехать до HTML, иначе генератор читает свой
+// зашитый список, а проверки этого не замечают.
+const MARKER = "МАЯЧОК-ИЗ-ОБЩЕГО-СПИСКА";
+const shared = JSON.parse(fs.readFileSync(path.join(work, "docs", "demo-cards.json"), "utf8"));
+shared[0].title = MARKER;
+fs.writeFileSync(path.join(work, "docs", "demo-cards.json"), JSON.stringify(shared, null, 2), "utf8");
 execFileSync(process.execPath, [path.join(work, "docs", "build-mockup.mjs"), "view=panel&theme=dark"], {
   cwd: work,
   stdio: "pipe",
@@ -97,6 +103,10 @@ check("подсказка чипа роли несёт время роли", () 
 
 check("нулевой расход не рисует строку «токенов: 0»", () => {
   assert.ok(!html.includes("токенов: 0"), "нулевой расход нарисован строкой расхода");
+});
+
+check("генератор читает общий список карточек", () => {
+  assert.ok(html.includes(MARKER), "правка общего списка не доехала до HTML");
 });
 
 check("значок «в ветке» есть у карточек из worktree", () => {

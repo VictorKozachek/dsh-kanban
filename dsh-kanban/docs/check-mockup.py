@@ -136,7 +136,10 @@ else:
 
 # 3. Общий список карточек и разбор расхода, как в JS.
 demo = json.loads((HERE / "demo-cards.json").read_text(encoding="utf-8"))
-drawn = [value for value, _fnt in drawn_texts(painter, styles, columns, demo) if isinstance(value, str)]
+# Сверяем ИМЕННО список painter'а: иначе проверка стережёт переданный ей аргумент,
+# а не то, что painter читает общий файл.
+check("painter читает общий список, а не свой", painter.CARDS == demo)
+drawn = [value for value, _fnt in drawn_texts(painter, styles, columns, painter.CARDS) if isinstance(value, str)]
 missing = [item["id"] for item in demo if f"#{item['id']}" not in drawn]
 check("painter рисует все карточки общего списка", not missing, ", ".join(missing))
 
