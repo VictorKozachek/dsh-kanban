@@ -378,6 +378,46 @@ else
   fail "статус с пробелом вне кавычек: $(head -1 "$WORK/out51")"
 fi
 
+# Ветка уже влита: слияния и коммита не будет, но карточка закрывается честно.
+ancestor_repo="$WORK/ancestor"
+make_repo "$ancestor_repo"
+( cd "$ancestor_repo" && ./bin/task-new.sh "Уже влита" --owner sess-test >/dev/null 2>&1 )
+( cd "$ancestor_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --owner sess-test --role worker >/dev/null 2>&1 )
+for step in in-review testing ready; do
+  ( cd "$ancestor_repo/worktrees/001" && ./bin/task-move.sh 001 "$step" >/dev/null 2>&1 )
+done
+git -C "$ancestor_repo" merge --no-ff task/001 -m "ручное слияние" >/dev/null 2>&1
+if ( cd "$ancestor_repo" && ./bin/task-commit.sh 001 --dry-run >"$WORK/out53" 2>&1 ); then
+  if grep -q "слияния не будет" "$WORK/out53" && ! grep -q "сообщение коммита" "$WORK/out53"; then
+    pass "сухой прогон не обещает коммит для уже влитой ветки"
+  else
+    fail "dry-run: $(tr '\n' ' ' < "$WORK/out53")"
+  fi
+else
+  fail "dry-run упал: $(cat "$WORK/out53")"
+fi
+# Коммит самой карточки при смене статуса — законный; слияния быть не должно.
+before_merges="$(git -C "$ancestor_repo" log --merges --oneline | wc -l | tr -d ' ')"
+if ( cd "$ancestor_repo" && ./bin/task-commit.sh 001 >"$WORK/out54" 2>&1 ); then
+  after_merges="$(git -C "$ancestor_repo" log --merges --oneline | wc -l | tr -d ' ')"
+  if [[ "$before_merges" == "$after_merges" ]] && grep -q '^status: merged' "$ancestor_repo/.kanban/tasks/001.md"; then
+    pass "уже влитая ветка закрывает карточку без коммита-слияния"
+  else
+    fail "merge-коммитов $before_merges → $after_merges"
+  fi
+else
+  fail "task-commit упал: $(cat "$WORK/out54")"
+fi
+if ( cd "$ancestor_repo" && ./bin/task-commit.sh 001 --no-merge --message "лишнее" --reason "проба" >"$WORK/out55" 2>&1 ); then
+  fail "--message вместе с --no-merge принят молча"
+else
+  if grep -q "никуда не пойдёт" "$WORK/out55"; then
+    pass "--message с --no-merge отвергнут"
+  else
+    fail "сообщение: $(cat "$WORK/out55")"
+  fi
+fi
+
 branch_repo="$WORK/branchguess"
 make_repo "$branch_repo"
 ( cd "$branch_repo" && ./bin/task-new.sh "Обычная задача с веткой" --owner sess-test >/dev/null 2>&1 )

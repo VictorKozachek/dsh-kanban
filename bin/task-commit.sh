@@ -18,6 +18,11 @@
 #   bin/task-commit.sh <id> [--message ТЕКСТ] [--branch ВЕТКА] [--dry-run]
 #   bin/task-commit.sh <id> --no-merge --reason "почему слияния нет" [--dry-run]
 #
+# Если ветка существует, но уже влита в основную (нес слитых коммитов нет), коммита
+# не будет: скрипт говорит об этом прямо, закрывает карточку в merged и пишет причину
+# в заметку. Сухой прогон для такой ветки слияния не обещает. `--message` вместе с
+# `--no-merge` отвергается: сообщению некуда идти.
+#
 # Режим --no-merge — для задачи, работа по которой уже в основной ветке (например,
 # инфраструктура набора: правки шли прямо в main, ветки task/<id> не было). Он
 # закрывает карточку в merged БЕЗ слияния, но требует причину: она пишется в
@@ -81,6 +86,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if (( NO_MERGE == 1 )) && [[ -n "$MESSAGE" ]]; then
+  echo "--no-merge: слияния не будет, сообщение никуда не пойдёт — уберите --message" >&2
+  exit 2
+fi
 
 # Пробельное значение — это забытый текст, и трактуется оно одинаково с --reason
 # (там причина обязательна). Пустое --message означает «возьми заголовок карточки».
@@ -237,7 +247,23 @@ subject="[$short] $MESSAGE"
 body="Card: $id (kanban, branch $BRANCH)"
 target="$(git -C "$ROOT" symbolic-ref --short -q HEAD || echo main)"
 
+# Ветка может существовать и быть уже влитой: тогда слияние не создаёт коммита,
+# и обещать его нельзя. Отличаем «сливать нечего» от настоящего слияния.
+already_merged=0
+if (( NO_MERGE == 0 )); then
+  ahead="$(git -C "$ROOT" rev-list --count "$target..$BRANCH" 2>/dev/null || echo 0)"
+  if [[ "$ahead" == "0" ]]; then
+    already_merged=1
+  fi
+fi
+
 if (( DRY_RUN == 1 )); then
+  if (( already_merged == 1 )); then
+    echo "ветка задачи: $BRANCH (уже влита в $target)"
+    echo "режим: слияния не будет — нес слитых коммитов нет, коммита не будет"
+    echo "карточка: $id → merged"
+    exit 0
+  fi
   if (( NO_MERGE == 1 )); then
     missing="$BRANCH"
     if [[ "$task_branch" != "$BRANCH" ]]; then missing="$BRANCH и $task_branch"; fi
@@ -256,15 +282,20 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
-if (( NO_MERGE == 0 )) && [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
-  echo "рабочий каталог не чист: слияние может запутаться. Закоммитьте или уберите изменения:" >&2
-  git -C "$ROOT" status --short >&2
-  exit 1
-fi
-
-if (( NO_MERGE == 0 )) && ! git -C "$ROOT" merge --no-ff "$BRANCH" -m "$subject" -m "$body"; then
-  echo "слияние не прошло: развязывайте конфликт вручную, карточка осталась в ready" >&2
-  exit 1
+merge_happened=0
+if (( NO_MERGE == 0 )) && (( already_merged == 1 )); then
+  echo "ветка $BRANCH уже влита в $target: нес слитых коммитов нет, коммита не будет"
+elif (( NO_MERGE == 0 )); then
+  if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+    echo "рабочий каталог не чист: слияние может запутаться. Закоммитьте или уберите изменения:" >&2
+    git -C "$ROOT" status --short >&2
+    exit 1
+  fi
+  if ! git -C "$ROOT" merge --no-ff "$BRANCH" -m "$subject" -m "$body"; then
+    echo "слияние не прошло: развязывайте конфликт вручную, карточка осталась в ready" >&2
+    exit 1
+  fi
+  merge_happened=1
 fi
 
 # Статус карточки меняется после слияния: карточка уже в основной ветке, и
@@ -273,6 +304,8 @@ fi
 move_args=("$id" merged --role dispatcher --force)
 if (( NO_MERGE == 1 )); then
   move_args+=(--note "закрыто без слияния: $REASON")
+elif (( merge_happened == 0 )); then
+  move_args+=(--note "закрыто без нового коммита: ветка $BRANCH уже влита в $target")
 fi
 if ! "$ROOT/bin/task-move.sh" "${move_args[@]}"; then
   if (( NO_MERGE == 1 )); then
@@ -287,6 +320,8 @@ echo
 if (( NO_MERGE == 1 )); then
   echo "задача $id закрыта без слияния: $REASON"
   echo "ветки $BRANCH не было — в основную ветку ничего не вливалось, коммита нет."
+elif (( merge_happened == 0 )); then
+  echo "задача $id закрыта: ветка $BRANCH уже была влита в $target, нового коммита нет."
 else
   echo "задача $id: $subject"
   echo "пуш делает человек, когда все задачи готовы и закоммичены:"
