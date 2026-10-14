@@ -13,10 +13,14 @@
 |---|---|
 | `dsh-kanban/` | Плагин DSH: таб «Канбан» в правом сайдбаре |
 | `dsh-kanban/lib/client.js` | Браузерная половина: колонки, карточки, опрос `.kanban/tasks` |
-| `dsh-kanban/lib/index.js` | Host-половина: пустой `apply` (данные берутся из штатного Remote) |
+| `dsh-kanban/lib/index.js` | Host-половина: сторож доски — наблюдает `.kanban/tasks` и отправляет наряд в сессию роли |
+| `dsh-kanban/lib/watcher-core.js` | Чистая часть сторожа: разбор карточек, снимок доски, правила нарядов |
 | `dsh-kanban/cordis.patch.yml` | Патч-слой пакета: вставляет свой Loader-ряд |
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
 | `dsh-kanban/test/render.test.mjs` | Тест рендера: регистрация в контексте, колонки, карточки |
+| `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
+| `dsh-kanban/test/delivery.test.mjs` | Тесты доставки наряда с поддельным сервисом сессий |
+| `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
 | `bin/test.sh` | Прогнать все проверки набора |
 | `.kanban/tasks/` | Карточки задач: один `<id>.md` на задачу |
 | `AGENTS.md` | Протокол работы агентов (читается каждым агентом автоматически) |
@@ -25,7 +29,7 @@
 | `agent-presets/{dispatcher,worker,reviewer,verifier}/` | Заготовки пресетов агентов |
 | `bin/task-new.sh` | Завести задачу: worktree + ветка + карточка внутри ветки |
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |
-| `bin/task-commit.sh` | Единственный путь в `merged`: merge ветки задачи с сообщением по правилу (пуш — руками) |
+| `bin/task-commit.sh` | Путь в `merged`: слияние ветки задачи с сообщением по правилу, а для работы, которая уже в `main`, — `--no-merge --reason` (пуш — руками) |
 | `bin/task-usage.sh` | Расход токенов сессии из кэша проекций DSH (для поля `tokens_<роль>`) |
 | `bin/board-sync.sh` | Манифест открытых карточек — нужен только для worktree **вне** проекта (`--print` — показать) |
 | `bin/install-kanban.sh` | Поставить плагин в профиль DSH: `web` — штатно, `desktop` — вручную скриптом; `--takeover` убирает ручной ряд |
@@ -36,8 +40,9 @@
 | `bin/install-presets.sh` | Поставить пресеты ролей в патч-слой профиля (в этой версии DSH каталог `~/.dsh/.agent-presets` не читается) |
 | `bin/render-mockup.sh` | Перерисовать макет доски в PNG |
 | `dsh-kanban/docs/board-mockup-*.png` | Макеты: доска в панели и целиком, тёмная и светлая тема |
+| `dsh-kanban/docs/build-mockup.mjs`, `render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
 
-> `README.md` в этом каталоге — прежние заметки про AmneziaWG, они не тронуты.
+> `README.md` проекта — заметки самого проекта, набор их не трогает.
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
 > `bin/`, `dsh-kanban/` в любой проект.
 

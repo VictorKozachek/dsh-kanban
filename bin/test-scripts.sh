@@ -582,6 +582,18 @@ else
   fail "отсутствующий источник дал ошибку: $(cat "$WORK/out43")"
 fi
 
+echo "== таблица файлов в KANBAN.md не врёт"
+missing=""
+while IFS= read -r path; do
+  case "$path" in *"{"*|*"*"*) continue ;; esac
+  [[ -e "$ROOT/$path" ]] || missing="$missing $path"
+done < <(grep '^| `' "$ROOT/KANBAN.md" | sed -e 's/^| `//' -e 's/`.*//')
+if [[ -z "$missing" ]]; then
+  pass "все пути из таблицы файлов существуют"
+else
+  fail "в таблице файлов есть несуществующие пути:$missing"
+fi
+
 echo "== набор совпадает с проектом-источником"
 if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
   pass "$(head -1 "$WORK/out40")"
