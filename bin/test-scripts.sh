@@ -535,6 +535,53 @@ if grep -q '^tokens_worker: 6000' "$guard_card"; then pass "расход рол�
 if grep -q '^tokens: 6000' "$guard_card"; then pass "суммарный расход посчитан"; else fail "tokens: $(grep '^tokens:' "$guard_card")"; fi
 if grep -q '^since: ' "$guard_card"; then pass "метка since записана"; else fail "since не записан"; fi
 
+echo "== синхронизация набора: перенос, удаление, --check"
+sync_src="$WORK/sync-src"; sync_dst="$WORK/sync-dst"
+mkdir -p "$sync_src/bin" "$sync_src/.kanban/tasks" "$sync_dst/bin"
+cp "$ROOT/bin/sync-from-awg.sh" "$sync_src/bin/sync-from-awg.sh"
+cp "$ROOT/bin/sync-from-awg.sh" "$sync_dst/bin/sync-from-awg.sh"
+chmod +x "$sync_src/bin/sync-from-awg.sh" "$sync_dst/bin/sync-from-awg.sh"
+printf 'one' > "$sync_src/bin/one.sh"
+printf 'two' > "$sync_src/bin/two.sh"
+printf 'readme' > "$sync_src/.kanban/tasks/README.md"
+if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >"$WORK/out41" 2>&1 ); then
+  if [[ -f "$sync_dst/bin/one.sh" && -f "$sync_dst/bin/two.sh" && -f "$sync_dst/.kanban/tasks/README.md" ]]; then
+    pass "перенос из источника копирует файлы набора"
+  else
+    fail "после переноса не все файлы на месте"
+  fi
+else
+  fail "перенос упал: $(cat "$WORK/out41")"
+fi
+printf 'лишний' > "$sync_dst/bin/only-here.sh"
+rm "$sync_src/bin/two.sh"
+( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >/dev/null 2>&1 )
+if [[ -f "$sync_dst/bin/two.sh" || -f "$sync_dst/bin/only-here.sh" ]]; then
+  fail "перенос не убрал то, чего нет в источнике"
+else
+  pass "перенос убирает то, чего нет в источнике"
+fi
+if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >/dev/null 2>&1 ); then
+  pass "после переноса --check видит совпадение"
+else
+  fail "--check не видит совпадение сразу после переноса"
+fi
+printf 'правка' >> "$sync_dst/bin/one.sh"
+if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >"$WORK/out42" 2>&1 ); then
+  fail "--check не заметил расхождение"
+else
+  if grep -q "bin" "$WORK/out42"; then
+    pass "--check называет разошедшийся путь"
+  else
+    fail "сообщение: $(cat "$WORK/out42")"
+  fi
+fi
+if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$WORK/нет-такого" --check >"$WORK/out43" 2>&1 ); then
+  pass "отсутствующий источник не ломает проверку"
+else
+  fail "отсутствующий источник дал ошибку: $(cat "$WORK/out43")"
+fi
+
 echo "== набор совпадает с проектом-источником"
 if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
   pass "$(head -1 "$WORK/out40")"

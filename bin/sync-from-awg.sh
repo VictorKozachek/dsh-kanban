@@ -61,9 +61,20 @@ for path in "${PATHS[@]}"; do
     fi
   elif [[ -d "$FROM/$path" ]]; then
     mkdir -p "$ROOT/$path"
-    # rsync убирает и то, что удалили в источнике; если его нет — просто копируем.
-    rsync -a --delete "$FROM/$path/" "$ROOT/$path/" 2>/dev/null || cp -R "$FROM/$path/." "$ROOT/$path/"
+    # rsync убирает и то, что удалили в источнике. Если он не справился — это отказ,
+    # а не повод тихо скопировать без удалений: расхождение осталось бы незамеченным.
+    if command -v rsync >/dev/null 2>&1; then
+      if ! rsync -a --delete "$FROM/$path/" "$ROOT/$path/"; then
+        echo "rsync не справился с $path: перенос прерван" >&2
+        exit 1
+      fi
+    else
+      echo "предупреждение: rsync не найден — копирую $path без удаления лишнего" >&2
+      cp -R "$FROM/$path/." "$ROOT/$path/"
+    fi
   else
+    # Файл может лежать в каталоге, которого в приёмнике ещё нет.
+    mkdir -p "$(dirname "$ROOT/$path")"
     cp -p "$FROM/$path" "$ROOT/$path"
   fi
 done
