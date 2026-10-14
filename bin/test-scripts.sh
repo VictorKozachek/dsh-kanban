@@ -684,11 +684,17 @@ else
 fi
 printf 'лишний' > "$sync_dst/bin/only-here.sh"
 rm "$sync_src/bin/two.sh"
+# Удаление лишнего делает rsync --delete: без него скрипт предупреждает и копирует
+# без удаления, поэтому проверка не имеет смысла, а не «падает».
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "   пропуск: удаление лишнего требует rsync (его нет в PATH)"
+else
 ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >/dev/null 2>&1 )
 if [[ -f "$sync_dst/bin/two.sh" || -f "$sync_dst/bin/only-here.sh" ]]; then
   fail "перенос не убрал то, чего нет в источнике"
 else
   pass "перенос убирает то, чего нет в источнике"
+fi
 fi
 if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >/dev/null 2>&1 ); then
   pass "после переноса --check видит совпадение"
@@ -729,6 +735,14 @@ elif [[ -z "$missing" ]]; then
   pass "все пути из таблицы файлов существуют (проверено $checked)"
 else
   fail "в таблице файлов есть несуществующие пути:$missing"
+fi
+
+code=0
+( cd "$sync_dst" && ./bin/sync-from-awg.sh --from >"$WORK/out56" 2>&1 ) || code=$?
+if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out56"; then
+  pass "--from без значения: код 2 и подсказка"
+else
+  fail "код $code, вывод: $(head -1 "$WORK/out56")"
 fi
 
 echo "== набор совпадает с проектом-источником"
