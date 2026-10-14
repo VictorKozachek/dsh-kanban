@@ -73,7 +73,7 @@ const CARDS = [
   { id: "005", title: "Инсталлятор пресетов", status: "ready", owner: "session-1a2b3c4d-77f0", role: "verifier", tokens: 1420000, branch: "task/005", updated: "2026-09-23T15:31:07Z", note: "проверено: YAML валиден, персона на месте" },
   { id: "006", title: "Проверить активацию в живом GUI", status: "blocked", owner: "session-4f8c1a20-9e11", role: "worker", tokens: 540000, updated: "2026-09-23T15:58:40Z", note: "ждём перезапуск dsh web" },
   { id: "007", title: "Описать протокол слияния веток", status: "todo", updated: "2026-09-23T15:20:00Z" },
-  { id: "008", title: "Починить вывод даты в карточке", status: "todo", updated: "2026-09-23T14:48:31Z" }
+  { id: "008", title: "Починить вывод даты в карточке", status: "todo", tokens: "0", updated: "2026-09-23T14:48:31Z" }
 ];
 
 const normalizeStatus = plugin.__internals.normalizeStatus;

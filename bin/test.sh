@@ -22,6 +22,14 @@ echo "== рендер доски (регистрация в контексте, 
 "$NODE" "$ROOT/dsh-kanban/test/render.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/watcher.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/delivery.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/mockup.test.mjs"
+
+echo "== макет: проверки painter'а (высота карточки и предел чипа владельца)"
+if command -v python3 >/dev/null 2>&1; then
+  PATH="$(dirname "$("$NODE" --which)"):$PATH" python3 "$ROOT/dsh-kanban/docs/check-mockup.py"
+else
+  echo "   python3 не найден — проверки painter'а пропущены"
+fi
 
 echo "== синтаксис скриптов"
 for file in "$ROOT"/bin/*.sh; do
