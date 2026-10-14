@@ -130,7 +130,7 @@ field_of() {
       gsub(/\\\\/, "\\");
       print;
       exit
-    }' "$card"
+    }' "$card" | sed -e "s/^[[:space:]']*//" -e "s/[[:space:]']*\$//"
 }
 
 # merged ставит только bin/task-commit.sh: он мержит ветку и собирает сообщение
@@ -168,18 +168,22 @@ guard_owner=1
 case "$current" in
   in-review|testing|ready) guard_owner=0 ;;
 esac
-if (( FORCE == 0 && guard_owner == 1 )) && [[ "$status" == "in-progress" && "$current" != "in-progress" ]]; then
-  holder="$(field_of owner)"
-  caller="${OWNER:-${DSH_SESSION_ID:-}}"
+holder="$(field_of owner)"
+caller="${OWNER:-${DSH_SESSION_ID:-}}"
+
+# Под проверкой не только взятие из очереди и разблокировка, но и карточка,
+# которая уже в работе, а владельца в ней нет: иначе её допишет себе любой, кто
+# её увидел (владелец пропадает через --force или ручную правку).
+if (( FORCE == 0 && guard_owner == 1 )) && [[ "$status" == "in-progress" ]] &&
+   { [[ "$current" != "in-progress" ]] || [[ -z "$holder" ]]; }; then
   if [[ -z "$caller" ]]; then
     echo "не знаю, кто берёт задачу $id: передайте --owner \"\$DSH_SESSION_ID\"" >&2
     exit 3
   fi
   if [[ -z "$holder" ]]; then
-    echo "задача $id не закреплена: её выдаёт оркестратор —" >&2
-    # Печатаем ТЕКУЩИЙ статус: повторная запись того же статуса разрешена,
-    # поэтому команда верна и для разблокировки (blocked), а не только для todo.
-    echo "  bin/task-move.sh $id ${current:-todo} --owner $caller" >&2
+    # Готовую команду не печатаем: она же была и готовым обходом правила.
+    echo "задача $id не закреплена: выдаёт её оркестратор — попросите его закрепить" >&2
+    echo "карточку за вами; протокол выдачи — AGENTS.md, пункт 6." >&2
     echo "осознанный обход: --force" >&2
     exit 3
   fi

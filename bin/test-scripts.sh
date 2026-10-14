@@ -393,6 +393,11 @@ else
   else
     fail "сообщение: $(cat "$WORK/out20")"
   fi
+  if grep -q -- "--owner" "$WORK/out20"; then
+    fail "подсказка отказа печатает готовую команду и учит обходу"
+  else
+    pass "подсказка отказа не печатает команду"
+  fi
 fi
 if ( cd "$guard_repo/worktrees/002" && ./bin/task-move.sh 002 in-progress --owner sess-anyone --force >/dev/null 2>&1 ); then
   pass "--force берёт незакреплённую задачу"
@@ -451,6 +456,37 @@ if ( cd "$quoted_repo/worktrees/001" && ./bin/task-move.sh 001 in-progress --own
   pass "owner с кавычкой читается после снятия экранирования"
 else
   fail "владелец с кавычкой не смог взять карточку"
+fi
+
+owner_repo="$WORK/ownerforms"
+make_repo "$owner_repo"
+mkdir -p "$owner_repo/.kanban/tasks"
+printf -- "---\nid: \"001\"\ntitle: Одинарные кавычки\nstatus: todo\nowner: 'sess-A'\n---\n" > "$owner_repo/.kanban/tasks/001.md"
+printf -- "---\nid: \"002\"\ntitle: Ведущий пробел\nstatus: todo\nowner: \"  sess-A\"\n---\n" > "$owner_repo/.kanban/tasks/002.md"
+printf -- "---\nid: \"003\"\ntitle: В работе без владельца\nstatus: in-progress\nowner: \"\"\n---\n" > "$owner_repo/.kanban/tasks/003.md"
+if ( cd "$owner_repo" && ./bin/task-move.sh 001 in-progress --owner sess-A >/dev/null 2>&1 ); then
+  pass "owner в одинарных кавычках читается"
+else
+  fail "владелец в одинарных кавычках не смог взять карточку"
+fi
+if ( cd "$owner_repo" && ./bin/task-move.sh 002 in-progress --owner sess-A >/dev/null 2>&1 ); then
+  pass "ведущий пробел в owner снимается"
+else
+  fail "владелец с ведущим пробелом не смог взять карточку"
+fi
+if ( cd "$owner_repo" && ./bin/task-move.sh 003 in-progress --owner sess-thief >"$WORK/out48" 2>&1 ); then
+  fail "карточку в работе без владельца нельзя дописать себе"
+else
+  if grep -q "не закреплена" "$WORK/out48"; then
+    pass "карточка в работе без владельца не дописывается чужаком"
+  else
+    fail "сообщение: $(cat "$WORK/out48")"
+  fi
+fi
+if ( cd "$owner_repo" && ./bin/task-move.sh 003 in-progress --owner sess-owner --force >/dev/null 2>&1 ); then
+  pass "--force берёт карточку в работе без владельца"
+else
+  fail "--force не сработал на карточке без владельца"
 fi
 
 reassign_repo="$WORK/reassign"
