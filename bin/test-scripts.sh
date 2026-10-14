@@ -343,6 +343,32 @@ else
   fail "task-commit упал: $(cat "$WORK/out49")"
 fi
 
+# Пробельный статус не должен мешать слиянию: task-move.sh его терпит, значит и
+# task-commit.sh обязан (расхождение между скриптами и было предметом карточки).
+trim_repo="$WORK/trimstatus"
+make_repo "$trim_repo"
+mkdir -p "$trim_repo/.kanban/tasks"
+printf -- "---\nid: \"001\"\ntitle: Пробел в кавычках\nstatus: \"ready \"\n---\n" > "$trim_repo/.kanban/tasks/001.md"
+printf -- "---\nid: \"002\"\ntitle: Пробел вне кавычек\nstatus: ready \n---\n" > "$trim_repo/.kanban/tasks/002.md"
+if ( cd "$trim_repo" && ./bin/task-commit.sh 001 --no-merge --reason "проба" >"$WORK/out50" 2>&1 ); then
+  if grep -q '^status: merged' "$trim_repo/.kanban/tasks/001.md"; then
+    pass "статус ready с хвостовым пробелом в кавычках сливается"
+  else
+    fail "карточка не стала merged"
+  fi
+else
+  fail "статус с пробелом в кавычках: $(head -1 "$WORK/out50")"
+fi
+if ( cd "$trim_repo" && ./bin/task-commit.sh 002 --no-merge --reason "проба" >"$WORK/out51" 2>&1 ); then
+  if grep -q '^status: merged' "$trim_repo/.kanban/tasks/002.md"; then
+    pass "статус ready с хвостовым пробелом вне кавычек сливается"
+  else
+    fail "карточка не стала merged"
+  fi
+else
+  fail "статус с пробелом вне кавычек: $(head -1 "$WORK/out51")"
+fi
+
 branch_repo="$WORK/branchguess"
 make_repo "$branch_repo"
 ( cd "$branch_repo" && ./bin/task-new.sh "Обычная задача с веткой" --owner sess-test >/dev/null 2>&1 )
