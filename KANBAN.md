@@ -40,7 +40,7 @@
 | `bin/install-presets.sh` | Поставить пресеты ролей в патч-слой профиля (в этой версии DSH каталог `~/.dsh/.agent-presets` не читается) |
 | `bin/render-mockup.sh` | Перерисовать макет доски в PNG |
 | `dsh-kanban/docs/board-mockup-*.png` | Макеты: доска в панели и целиком, тёмная и светлая тема |
-| `dsh-kanban/docs/build-mockup.mjs`, `render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
+| `dsh-kanban/docs/build-mockup.mjs`, `dsh-kanban/docs/render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
 
 > `README.md` проекта — заметки самого проекта, набор их не трогает.
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
