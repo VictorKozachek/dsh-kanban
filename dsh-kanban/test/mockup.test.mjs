@@ -33,10 +33,9 @@ function check(name, fn) {
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-mockup-"));
 fs.mkdirSync(path.join(work, "docs"), { recursive: true });
 fs.cpSync(path.join(plugin, "lib"), path.join(work, "lib"), { recursive: true });
-fs.copyFileSync(
-  path.join(plugin, "docs", "build-mockup.mjs"),
-  path.join(work, "docs", "build-mockup.mjs"),
-);
+for (const name of ["build-mockup.mjs", "demo-cards.json"]) {
+  fs.copyFileSync(path.join(plugin, "docs", name), path.join(work, "docs", name));
+}
 execFileSync(process.execPath, [path.join(work, "docs", "build-mockup.mjs"), "view=panel&theme=dark"], {
   cwd: work,
   stdio: "pipe",
@@ -98,6 +97,15 @@ check("подсказка чипа роли несёт время роли", () 
 
 check("нулевой расход не рисует строку «токенов: 0»", () => {
   assert.ok(!html.includes("токенов: 0"), "нулевой расход нарисован строкой расхода");
+});
+
+check("значок «в ветке» есть у карточек из worktree", () => {
+  assert.ok(html.includes("в ветке"), "нет значка «в ветке»");
+});
+
+check("дата карточки в ISO, как показывает плагин", () => {
+  assert.match(html, /2026-09-23T\d{2}:\d{2}:\d{2}Z/, "нет ISO-даты");
+  assert.ok(!/\d{2}\.\d{2} \d{2}:\d{2}/.test(html), "в HTML осталась короткая дата");
 });
 
 check("положительный расход рисуется", () => {

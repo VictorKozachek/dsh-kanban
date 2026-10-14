@@ -9,8 +9,8 @@
  * отдельно: она не часть плагина и служит только для наглядности.
  *
  * Запуск:  node dsh-kanban/docs/build-mockup.mjs
- * Выход:   dsh-kanban/docs/board-mockup.html
- *          (дальше bin/render-mockup.sh делает из него PNG)
+ * Выход:   dsh-kanban/docs/board-mockup-<вид>-<тема>.html
+ *          (bin/render-mockup.sh делает из него PNG)
  */
 import fs from "node:fs";
 import vm from "node:vm";
@@ -65,16 +65,8 @@ const escapeHtml = (text) =>
   String(text).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]));
 
 /** Демонстрационные карточки: правдоподобная работа по этому же проекту. */
-const CARDS = [
-  { id: "001", title: "Скелет плагина dsh-kanban", status: "merged", owner: "session-4f8c1a20-9e11", role: "dispatcher", tokens: 2100000, branch: "task/001", updated: "2026-09-23T14:02:11Z", note: "влито в main" },
-  { id: "002", title: "Колонки, карточки и опрос .kanban/tasks", status: "in-progress", owner: "session-71bd0c3e-4a92", role: "worker", tokens: 1840000, branch: "task/002", updated: "2026-09-23T15:40:02Z", since: "2026-09-23T15:40:02Z" },
-  { id: "003", title: "Пресеты dispatcher / worker / verifier", status: "in-review", owner: "session-1a2b3c4d-77f0", role: "reviewer", tokens: 1240000, branch: "task/003", updated: "2026-09-23T15:12:44Z", since: "2026-09-23T15:12:44Z", note: "ревью: смотреть диф плагина" },
-  { id: "004", title: "Тесты парсера карточек в Node", status: "testing", owner: "session-71bd0c3e-4a92", role: "verifier", tokens: 860000, branch: "task/004", updated: "2026-09-23T15:55:19Z", note: "сдано: 12/12 проверок, нужен независимый прогон" },
-  { id: "005", title: "Инсталлятор пресетов", status: "ready", owner: "session-1a2b3c4d-77f0", role: "verifier", tokens: 1420000, branch: "task/005", updated: "2026-09-23T15:31:07Z", note: "проверено: YAML валиден, персона на месте" },
-  { id: "006", title: "Проверить активацию в живом GUI", status: "blocked", owner: "session-4f8c1a20-9e11", role: "worker", tokens: 540000, updated: "2026-09-23T15:58:40Z", note: "ждём перезапуск dsh web" },
-  { id: "007", title: "Описать протокол слияния веток", status: "todo", updated: "2026-09-23T15:20:00Z" },
-  { id: "008", title: "Починить вывод даты в карточке", status: "todo", tokens: "0", updated: "2026-09-23T14:48:31Z" }
-];
+// Общий список демонстрационных карточек: тот же файл читает painter.
+const CARDS = JSON.parse(fs.readFileSync(path.join(here, "demo-cards.json"), "utf8"));
 
 const normalizeStatus = plugin.__internals.normalizeStatus;
 const shortOwner = (owner) => (owner.length > 14 ? owner.slice(0, 12) + "…" : owner);
@@ -114,6 +106,9 @@ function cardHtml(card) {
   const parts = [
     `<div style="${css(styles.cardTop)}">`,
     `<span style="${css(styles.cardId)}">#${escapeHtml(card.id)}</span>`,
+    card.source === "worktree"
+      ? `<span style="${css(styles.branchBadge)}" title="${escapeHtml(card.path || "")}">в ветке</span>`
+      : "",
     role
       ? `<span style="${css(styles.roleBadge)}" title="${escapeHtml(
           card.since ? `${card.role} · с ${card.since}` : card.role

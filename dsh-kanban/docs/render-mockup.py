@@ -67,23 +67,38 @@ def role_label_of(card):
     return ROLE_LABELS.get(role, role)
 
 
+def parse_tokens(value):
+    """Разбор расхода как в JS: Number() понимает `1e3` и `0x10`, int() — нет."""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return None
+    try:
+        if re.fullmatch(r"[+-]?0[xX][0-9a-fA-F]+", text):
+            return float(int(text, 16))
+        return float(text)
+    except ValueError:
+        return None
+
+
+def js_number(value):
+    """Запись числа как в JS: целое без «.0»."""
+    number = float(value)
+    return str(int(number)) if number.is_integer() else str(number)
+
+
 def has_tokens(card):
     """Есть ли расход: ноль и пустое значение — это отсутствие данных."""
-    value = str(card.get("tokens") or "").replace(" ", "")
-    try:
-        return int(value) > 0
-    except ValueError:
-        return False
+    number = parse_tokens(card.get("tokens"))
+    return number is not None and number > 0
 
 
 def format_tokens(value):
     """Компактная запись числа — как formatTokens в плагине."""
-    try:
-        number = int(str(value).replace(" ", ""))
-    except ValueError:
+    number = parse_tokens(value)
+    if number is None:
         return str(value)
     if number < 1000:
-        return str(number)
+        return js_number(number)
     for limit, suffix in ((1000000000, "G"), (1000000, "M"), (1000, "k")):
         if number >= limit:
             scaled = number / limit
@@ -91,34 +106,7 @@ def format_tokens(value):
             return text.replace(".", ",") + suffix
     return str(number)
 
-CARDS = [
-    {"id": "001", "title": "Скелет плагина dsh-kanban", "status": "merged",
-     "owner": "session-4f8c1a20-9e11", "role": "dispatcher", "tokens": "2100000",
-     "branch": "task/001", "updated": "23.09 14:02", "note": "влито в main"},
-    {"id": "002", "title": "Колонки, карточки и опрос .kanban/tasks", "status": "in-progress",
-     "owner": "session-71bd0c3e-4a92", "role": "worker", "tokens": "1840000",
-     "branch": "task/002", "updated": "23.09 15:40", "source": "worktree"},
-    {"id": "003", "title": "Пресеты dispatcher / worker / verifier", "status": "in-review",
-     "owner": "session-1a2b3c4d-77f0", "role": "reviewer", "tokens": "1240000",
-     "branch": "task/003", "updated": "23.09 15:12", "source": "worktree",
-     "note": "ревью: смотреть диф плагина"},
-    {"id": "004", "title": "Тесты парсера карточек в Node", "status": "testing",
-     "owner": "session-71bd0c3e-4a92", "role": "verifier", "tokens": "860000",
-     "branch": "task/004", "updated": "23.09 15:55", "source": "worktree",
-     "note": "сдано: 12/12 проверок"},
-    {"id": "005", "title": "Инсталлятор пресетов", "status": "ready",
-     "owner": "session-1a2b3c4d-77f0", "role": "verifier", "tokens": "1420000",
-     "branch": "task/005", "updated": "23.09 15:31", "source": "worktree",
-     "note": "проверено: YAML валиден"},
-    {"id": "006", "title": "Проверить активацию в живом GUI", "status": "blocked",
-     "owner": "session-4f8c1a20-9e11", "role": "worker", "tokens": "540000",
-     "updated": "23.09 15:58", "source": "worktree",
-     "note": "ждём перезапуск dsh web"},
-    {"id": "007", "title": "Описать протокол слияния веток", "status": "todo",
-     "updated": "23.09 15:20", "source": "worktree"},
-    {"id": "008", "title": "Починить вывод даты в карточке", "status": "todo",
-     "updated": "23.09 14:48", "source": "worktree"},
-]
+CARDS = json.loads(open(os.path.join(HERE, "demo-cards.json"), encoding="utf-8").read())
 
 
 # ── утилиты ──────────────────────────────────────────────────────────────────

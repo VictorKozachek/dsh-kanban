@@ -134,5 +134,14 @@ else:
     )
     check("предел действительно обрезает подпись", label != "session-abcd\u2026")
 
+# 3. Общий список карточек и разбор расхода, как в JS.
+demo = json.loads((HERE / "demo-cards.json").read_text(encoding="utf-8"))
+drawn = [value for value, _fnt in drawn_texts(painter, styles, columns, demo) if isinstance(value, str)]
+missing = [item["id"] for item in demo if f"#{item['id']}" not in drawn]
+check("painter рисует все карточки общего списка", not missing, ", ".join(missing))
+
+parsed = [painter.format_tokens(value) for value in ("1e3", "1.5", "0x10", "1e9")]
+check("разбор расхода совпадает с JS", parsed == ["1,0k", "1.5", "16", "1,0G"], str(parsed))
+
 print(f"\nпроверок painter'а: {len(ok_names)} ок, провалов {failures}")
 sys.exit(1 if failures else 0)
