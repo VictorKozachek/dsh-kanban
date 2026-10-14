@@ -583,11 +583,16 @@ else
 fi
 
 echo "== таблица файлов в KANBAN.md не врёт"
+# Смотрим только таблицу раздела «Что лежит в проекте»: в других таблицах
+# встречаются команды и голые имена файлов, и проверка путей к ним не относится.
 missing=""
-while IFS= read -r path; do
-  case "$path" in *"{"*|*"*"*) continue ;; esac
-  [[ -e "$ROOT/$path" ]] || missing="$missing $path"
-done < <(grep '^| `' "$ROOT/KANBAN.md" | sed -e 's/^| `//' -e 's/`.*//')
+while IFS= read -r row; do
+  first="$(printf '%s' "$row" | sed -e 's/^| //' -e 's/ |.*$//')"
+  for path in $(printf '%s' "$first" | awk -F'\x60' '{for (i = 2; i <= NF; i += 2) print $i}'); do
+    case "$path" in *"{"*|*"*"*) continue ;; esac
+    [[ -e "$ROOT/$path" ]] || missing="$missing $path"
+  done
+done < <(awk '/^## Что лежит в проекте/{inside=1; next} inside && /^## /{exit} inside && /^\| `/{print}' "$ROOT/KANBAN.md")
 if [[ -z "$missing" ]]; then
   pass "все пути из таблицы файлов существуют"
 else
