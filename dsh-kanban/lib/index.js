@@ -114,6 +114,18 @@ async function deliver(ctx, item) {
   }
 }
 
+/** Роли доски: id пресета совпадает с именем роли, но допускаем префикс `preset-`. */
+const ROLES = ["dispatcher", "worker", "reviewer", "verifier"];
+
+/** Файл автокарты ролей — рядом с состоянием сторожа, в `.gitignore`. */
+const ROLES_FILE = ".watcher-roles.json";
+
+/** Роль по id пресета: `reviewer` и `preset-reviewer` — это одно и то же. */
+function roleOfPreset(agentPreset) {
+  const name = String(agentPreset ?? "").replace(/^preset-/, "");
+  return ROLES.includes(name) ? name : null;
+}
+
 /**
  * Включить сторож: по одному наблюдению на каждый корень из конфига.
  *
@@ -123,7 +135,9 @@ async function deliver(ctx, item) {
 export function apply(ctx, config = {}) {
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
-    const roles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+    const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+    // Эффективная карта ролей: ручные id из строки плагина главнее автокарты.
+    const roles = { ...configuredRoles };
     // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
     const debounceMs = Number.isFinite(config?.debounceMs) ? Number(config.debounceMs) : DEBOUNCE_MS;
     const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
@@ -142,6 +156,12 @@ export function apply(ctx, config = {}) {
       if (previous === null) {
         log(ctx, "warn", `нет каталога карточек: ${tasksDir}`);
         continue;
+      }
+
+      // Автокарту ролей читаем с доски: она переживает перезапуск профиля.
+      // Ручной конфиг главнее — он остаётся на случай, когда событие не пришло.
+      for (const [role, sessionId] of Object.entries(loadState(path.join(String(board), ".kanban", ROLES_FILE)))) {
+        if (!configuredRoles[role] && !roles[role]) roles[role] = String(sessionId);
       }
 
       const state = loadState(stateFile);
@@ -191,12 +211,37 @@ export function apply(ctx, config = {}) {
         const watcher = fs.watch(tasksDir, () => {
           if (timer) clearTimeout(timer);
           timer = setTimeout(tick, debounceMs);
+          // Таймер паузы тоже отслеживаем: иначе после dispose он выстрелит ещё раз.
+          timers.push(timer);
         });
         watchers.push(watcher);
       } catch (error) {
         log(ctx, "warn", `не слежу за ${tasksDir}: ${error?.message ?? error}`);
       }
     }
+
+    // Роль сессии узнаём сами: DSH объявляет выбор пресета глобальным событием
+    // `agent-preset/selected` (sessionId, agentPreset) — см. dsh-agent-presets.
+    // Так id ролей не приходится держать руками, и они не стареют, когда сессию
+    // роли пересоздают: новая сессия снова выберет пресет и снова объявится.
+    const persistRoles = () => {
+      const auto = {};
+      for (const role of ROLES) {
+        if (!configuredRoles[role] && roles[role]) auto[role] = roles[role];
+      }
+      for (const board of boards) {
+        saveState(path.join(String(board), ".kanban", ROLES_FILE), auto);
+      }
+    };
+    ctx.on?.("agent-preset/selected", (sessionId, agentPreset) => {
+      const role = roleOfPreset(agentPreset);
+      if (!role || configuredRoles[role]) return;
+      const id = String(sessionId ?? "");
+      if (!id || roles[role] === id) return;
+      roles[role] = id;
+      persistRoles();
+      log(ctx, "info", `роль ${role} закреплена за сессией ${id} (пресет ${agentPreset})`);
+    });
 
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${Object.keys(roles).length}`);
     ctx.on?.("dispose", () => {

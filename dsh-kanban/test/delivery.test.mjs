@@ -68,9 +68,11 @@ function makeBoard(cards) {
 }
 
 function makeCtx(calls, failure = null) {
+  const handlers = new Map();
   return {
     logger: () => ({ info: () => {}, warn: () => {} }),
-    on: () => {},
+    on: (name, handler) => { handlers.set(name, handler); },
+    pick: (name) => handlers.get(name),
     sessionController: {
       prompt: async (request) => {
         if (failure) throw new Error(failure);
@@ -161,6 +163,70 @@ await check("неизвестная сессия не роняет сторож"
   apply(makeCtx(calls, "session/not-found"), { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 20 });
   await sleep(400);
   assert.deepEqual(stateKeys(board), [], "ключ записали, хотя наряд не доставлен");
+});
+
+// Роли сторожа можно закрепить и по событию выбора пресета, а не только конфигом.
+// Эти проверки идут через стартовый обход: он детерминирован, а fs.watch под
+// нагрузкой набора иногда опаздывает.
+
+await check("роль закрепляется событием выбора пресета", async () => {
+  const board = makeBoard([["002", "in-review", { owner: "sess-worker" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { boards: [board], catchUpMs: 30, debounceMs: 20 });
+  ctx.pick("agent-preset/selected")("sess-reviewer-auto", "reviewer");
+  await waitFor(() => calls.length > 0);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  assert.equal(calls[0].sessionId, "sess-reviewer-auto");
+  ctx.pick("dispose")();
+});
+
+await check("ручной id в конфиге главнее автокарты", async () => {
+  const board = makeBoard([["002", "in-review", { owner: "sess-worker" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { boards: [board], roles: { reviewer: "sess-config" }, catchUpMs: 30, debounceMs: 20 });
+  ctx.pick("agent-preset/selected")("sess-auto", "reviewer");
+  await waitFor(() => calls.length > 0);
+  assert.equal(calls[0]?.sessionId, "sess-config");
+  ctx.pick("dispose")();
+});
+
+await check("чужой пресет роль не закрепляет", async () => {
+  const board = makeBoard([["002", "in-review", { owner: "sess-worker" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { boards: [board], catchUpMs: 30, debounceMs: 20 });
+  ctx.pick("agent-preset/selected")("sess-somebody", "standard");
+  await sleep(200);
+  assert.equal(calls.length, 0, "наряд ушёл в чужую сессию");
+  ctx.pick("dispose")();
+});
+
+await check("карта ролей переживает перезапуск профиля", async () => {
+  const board = makeBoard([["002", "in-review", { owner: "sess-worker" }]]);
+  const first = makeCtx([]);
+  // Стартовый обход первого сторожа отодвинут: он нужен только чтобы запомнить роль.
+  apply(first, { boards: [board], catchUpMs: 5000, debounceMs: 20 });
+  first.pick("agent-preset/selected")("sess-remembered", "reviewer");
+  first.pick("dispose")();
+  const calls = [];
+  const second = makeCtx(calls);
+  apply(second, { boards: [board], catchUpMs: 30, debounceMs: 20 });
+  await waitFor(() => calls.length > 0);
+  assert.equal(calls[0]?.sessionId, "sess-remembered");
+  second.pick("dispose")();
+});
+
+await check("префикс preset- в id пресета распознаётся", async () => {
+  const board = makeBoard([["002", "testing", { owner: "sess-worker" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { boards: [board], catchUpMs: 30, debounceMs: 20 });
+  ctx.pick("agent-preset/selected")("sess-verifier", "preset-verifier");
+  await waitFor(() => calls.length > 0);
+  assert.equal(calls[0]?.sessionId, "sess-verifier");
+  ctx.pick("dispose")();
 });
 
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);

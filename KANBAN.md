@@ -18,7 +18,7 @@
 |---|---|
 | `dsh-kanban/` | Плагин DSH: таб «Канбан» в правом сайдбаре |
 | `dsh-kanban/lib/client.js` | Браузерная половина: колонки, карточки, опрос `.kanban/tasks` |
-| `dsh-kanban/lib/index.js` | Host-половина: сторож доски — наблюдает `.kanban/tasks` и отправляет наряд в сессию роли |
+| `dsh-kanban/lib/index.js` | Host-половина: сторож доски — наблюдает `.kanban/tasks`, сам подхватывает сессии ролей по выбору пресета и отправляет наряд |
 | `dsh-kanban/lib/watcher-core.js` | Чистая часть сторожа: разбор карточек, снимок доски, правила нарядов |
 | `dsh-kanban/cordis.patch.yml` | Патч-слой пакета: вставляет свой Loader-ряд |
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
