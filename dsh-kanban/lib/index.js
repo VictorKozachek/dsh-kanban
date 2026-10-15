@@ -234,6 +234,15 @@ export function apply(ctx, config = {}) {
           // же deliverOnce: если объявление выше уже взяло наряд в работу, повтор
           // не отправит второе сообщение.
           for (const [key, item] of Object.entries(pending)) {
+            const card = previous.get(item.cardId);
+            // След мог устареть: карточка уехала дальше или её уже нет на доске.
+            // Такой наряд отправлять нечего — молча снимаем, иначе он висел бы в
+            // файле и повторялся при каждом старте.
+            if (!card || card.status !== item.status) {
+              delete pending[key];
+              saveState(pendingFile, pending);
+              continue;
+            }
             deliverOnce(key, item);
           }
         }, catchUpMs),

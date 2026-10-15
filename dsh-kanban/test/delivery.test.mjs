@@ -302,5 +302,30 @@ await check("стартовый обход и повтор недоставле�
   good.pick("dispose")();
 });
 
+await check("устаревший след не отправляется и снимается", async () => {
+  const board = makeBoard([["002", "in-review", { owner: "sess-worker" }]]);
+  // След от прошлого запуска: тогда карточка была в testing, потом уехала дальше.
+  fs.writeFileSync(
+    path.join(board, ".kanban", ".watcher-pending.json"),
+    JSON.stringify({
+      "002:testing:2026-10-14T10:00:00Z": {
+        cardId: "002",
+        status: "testing",
+        sessionId: "sess-old",
+        text: "старый наряд",
+        at: "2026-10-14T10:00:00Z"
+      }
+    }, null, 2)
+  );
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { boards: [board], roles: { verifier: "sess-verifier" }, catchUpMs: 30, debounceMs: 20 });
+  await sleep(250);
+  assert.equal(calls.length, 0, `нарядов ${calls.length}`);
+  const left = JSON.parse(fs.readFileSync(path.join(board, ".kanban", ".watcher-pending.json"), "utf8"));
+  assert.deepEqual(Object.keys(left), [], "устаревший след остался в файле");
+  ctx.pick("dispose")();
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);
