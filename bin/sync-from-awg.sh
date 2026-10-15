@@ -89,9 +89,20 @@ if (( CHECK == 1 )) && git -C "$FROM" rev-parse --git-dir >/dev/null 2>&1; then
   done
   if (( ${#in_head[@]} > 0 )) && git -C "$FROM" archive HEAD -- "${in_head[@]}" 2>/dev/null | tar -x -C "$committed" 2>/dev/null; then
     compare_from="$committed"
-    dirty_count="$(git -C "$FROM" status --porcelain -- "${PATHS[@]}" 2>/dev/null | wc -l | tr -d ' ')"
-    if [[ "$dirty_count" != "0" ]]; then
-      source_dirty="$dirty_count"
+    # Незакоммиченные пути источника: перенос забирает и их, поэтому в сравнении с
+    # HEAD они выглядели бы «есть только в приёмнике». Это работа в процессе, а не
+    # расхождение набора — такие пути не сверяем и сообщаем о них отдельно.
+    dirty_paths="$(git -C "$FROM" status --porcelain -- "${PATHS[@]}" 2>/dev/null | cut -c4- | tr -d '"')"
+    if [[ -n "$dirty_paths" ]]; then
+      source_dirty="$(printf '%s\n' "$dirty_paths" | grep -c .)"
+      # Сверяемся с тем, что перенос реально забирает: HEAD плюс незакоммиченные
+      # файлы источника. Иначе перенесённое «грязное» выглядело бы расхождением.
+      for dirty in $dirty_paths; do
+        if [[ -e "$FROM/$dirty" ]]; then
+          mkdir -p "$committed/$(dirname "$dirty")"
+          cp -R "$FROM/$dirty" "$committed/$dirty"
+        fi
+      done
     fi
   else
     echo "предупреждение: не прочитал зафиксированное состояние источника — сверяю рабочее дерево" >&2
@@ -99,6 +110,7 @@ if (( CHECK == 1 )) && git -C "$FROM" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 diverged=""
+dirty_paths="${dirty_paths:-}"
 for path in "${PATHS[@]}"; do
   if [[ ! -e "$compare_from/$path" ]]; then
     continue
