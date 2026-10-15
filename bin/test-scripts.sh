@@ -788,6 +788,19 @@ if "$ROOT/bin/board-status.sh" --root "$dump_repo" >"$WORK/out59" 2>&1 && grep -
 else
   fail "нет отметки ветки: $(head -3 "$WORK/out59")"
 fi
+# Работа уже в main, а worktree забыли убрать: свежая запись побеждает, как на доске.
+printf -- "---\nid: \"001\"\nstatus: merged\ntitle: Карточка в ветке\nupdated: 2026-10-15T10:00:00Z\n---\n" > "$dump_repo/.kanban/tasks/001.md"
+printf -- "---\nid: \"001\"\nstatus: in-progress\ntitle: Карточка в ветке\nupdated: 2026-10-14T10:00:00Z\n---\n" > "$dump_repo/worktrees/001/.kanban/tasks/001.md"
+if "$ROOT/bin/board-status.sh" --root "$dump_repo" >"$WORK/out62" 2>&1 && grep -q "\[merged\]" "$WORK/out62"; then
+  pass "старая копия из ветки не перебивает свежую карточку main"
+else
+  fail "статус взят из ветки: $(grep '#001' "$WORK/out62" | head -1)"
+fi
+if "$ROOT/bin/board-status.sh" --help >"$WORK/out63" 2>&1 && grep -q "bin/board-status.sh --root" "$WORK/out63"; then
+  pass "у дампа есть справка"
+else
+  fail "справка: $(head -1 "$WORK/out63")"
+fi
 if "$ROOT/bin/board-status.sh" --json >"$WORK/out60" 2>&1 &&
   "$ROOT/bin/node.sh" -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!Array.isArray(d.cards)||!d.cards.length) process.exit(1)" "$WORK/out60"; then
   pass "--json отдаёт карточки машинно"

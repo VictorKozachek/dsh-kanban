@@ -71,6 +71,22 @@ export function snapshotCards(entries) {
  * @param status - статус, о котором идёт наряд.
  * @returns Строковый ключ для файла состояния сторожа.
  */
+/**
+ * Какая запись карточки свежее. Та же логика, что в клиентской половине
+ * (`lib/client.js`, `__internals.isNewer`): `updated` сравниваем лексикографически,
+ * при равенстве выигрывает карточка из ветки. Половинки плагина живут в разных
+ * модульных системах (классический скрипт против ESM), поэтому копий две — что они
+ * не разъезжаются, проверяет `test/merge.test.mjs`.
+ */
+export function isNewer(candidate, current) {
+  const left = String(candidate?.updated ?? "");
+  const right = String(current?.updated ?? "");
+  if (left && right) return left === right ? candidate.source === "worktree" : left > right;
+  if (left) return true;
+  if (right) return false;
+  return candidate.source === "worktree";
+}
+
 export function deliveryKey(card, status) {
   return `${card?.id ?? ""}:${status ?? ""}:${card?.updated ?? ""}`;
 }

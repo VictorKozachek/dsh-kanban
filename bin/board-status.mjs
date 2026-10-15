@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { snapshotCards } from "../dsh-kanban/lib/watcher-core.js";
+import { isNewer, snapshotCards } from "../dsh-kanban/lib/watcher-core.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
@@ -40,6 +40,13 @@ for (let index = 0; index < args.length; index += 1) {
     index += 1;
   } else if (args[index] === "--json") {
     asJson = true;
+  } else if (args[index] === "-h" || args[index] === "--help") {
+    console.log("Дамп доски: колонки, карточки и кто на них.");
+    console.log("");
+    console.log("  bin/board-status.sh              # доска текущего проекта");
+    console.log("  bin/board-status.sh --json       # то же машинно");
+    console.log("  bin/board-status.sh --root DIR   # доска другого проекта");
+    process.exit(0);
   } else {
     console.error(`неизвестный аргумент: ${args[index]}`);
     process.exit(2);
@@ -71,7 +78,11 @@ if (fs.existsSync(worktreesDir)) {
     const [entry] = snapshotCards([[`${name}.md`, fs.readFileSync(file, "utf8")]]).values();
     if (!entry) continue;
     entry.source = "worktree";
-    cards.set(entry.id, entry);
+    // Правило то же, что на доске в GUI: свежая запись побеждает, при равенстве —
+    // карточка из ветки. Иначе «работа уже в main, а worktree не убрали» показывал
+    // бы старый статус.
+    const existing = cards.get(entry.id);
+    if (!existing || isNewer(entry, existing)) cards.set(entry.id, entry);
   }
 }
 
