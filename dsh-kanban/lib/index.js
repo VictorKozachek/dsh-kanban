@@ -148,6 +148,8 @@ export function apply(ctx, config = {}) {
 
     const watchers = [];
     const timers = [];
+    /** Повторный обход досок: нужен, когда роль появляется позже карточки. */
+    const reannounce = [];
 
     for (const board of boards) {
       const tasksDir = path.join(String(board), ".kanban", "tasks");
@@ -196,6 +198,11 @@ export function apply(ctx, config = {}) {
         }, catchUpMs),
       );
 
+      // Тот же обход с пустым «предыдущим»: зовём, когда роль появилась позже
+      // карточки, которая её ждёт. Повторов не будет — доставленные наряды лежат
+      // в файле состояния по ключу id:status:updated.
+      reannounce.push(() => announce(new Map(), previous));
+
       // 2. Переходы: следим за каталогом и разбираем изменения.
       let timer = null;
       const tick = () => {
@@ -241,6 +248,15 @@ export function apply(ctx, config = {}) {
       roles[role] = id;
       persistRoles();
       log(ctx, "info", `роль ${role} закреплена за сессией ${id} (пресет ${agentPreset})`);
+      // Карточки, которые ждали роль до её появления, иначе остались бы без наряда
+      // до следующего перехода: сессия роли выбирает пресет один раз при создании.
+      for (const again of reannounce) {
+        try {
+          again();
+        } catch (error) {
+          log(ctx, "warn", `не объявил доску после появления роли: ${error?.message ?? error}`);
+        }
+      }
     });
 
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${Object.keys(roles).length}`);

@@ -229,5 +229,22 @@ await check("префикс preset- в id пресета распознаётс�
   ctx.pick("dispose")();
 });
 
+await check("карточка, ждущая роль, объявляется при появлении роли", async () => {
+  const board = makeBoard([["005", "testing", { owner: "sess-worker" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { boards: [board], catchUpMs: 30, debounceMs: 20 });
+  await sleep(150);
+  assert.equal(calls.length, 0, "без роли наряда быть не должно");
+  ctx.pick("agent-preset/selected")("S-LATE", "verifier");
+  await waitFor(() => calls.length > 0);
+  assert.equal(calls[0]?.sessionId, "S-LATE");
+  // Повторное событие по той же роли не должно слать наряд второй раз.
+  ctx.pick("agent-preset/selected")("S-LATE", "verifier");
+  await sleep(150);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  ctx.pick("dispose")();
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);
