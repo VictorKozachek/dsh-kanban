@@ -95,14 +95,6 @@ if (( CHECK == 1 )) && git -C "$FROM" rev-parse --git-dir >/dev/null 2>&1; then
     dirty_paths="$(git -C "$FROM" status --porcelain -- "${PATHS[@]}" 2>/dev/null | cut -c4- | tr -d '"')"
     if [[ -n "$dirty_paths" ]]; then
       source_dirty="$(printf '%s\n' "$dirty_paths" | grep -c .)"
-      # Сверяемся с тем, что перенос реально забирает: HEAD плюс незакоммиченные
-      # файлы источника. Иначе перенесённое «грязное» выглядело бы расхождением.
-      for dirty in $dirty_paths; do
-        if [[ -e "$FROM/$dirty" ]]; then
-          mkdir -p "$committed/$(dirname "$dirty")"
-          cp -R "$FROM/$dirty" "$committed/$dirty"
-        fi
-      done
     fi
   else
     echo "предупреждение: не прочитал зафиксированное состояние источника — сверяю рабочее дерево" >&2
