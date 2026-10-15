@@ -120,6 +120,9 @@ const ROLES = ["dispatcher", "worker", "reviewer", "verifier"];
 /** Файл автокарты ролей — рядом с состоянием сторожа, в `.gitignore`. */
 const ROLES_FILE = ".watcher-roles.json";
 
+/** Файл недоставленных нарядов: их повторяем при следующем старте профиля. */
+const PENDING_FILE = ".watcher-pending.json";
+
 /** Роль по id пресета: `reviewer` и `preset-reviewer` — это одно и то же. */
 function roleOfPreset(agentPreset) {
   const name = String(agentPreset ?? "").replace(/^preset-/, "");
@@ -167,6 +170,12 @@ export function apply(ctx, config = {}) {
       }
 
       const state = loadState(stateFile);
+      const pendingFile = path.join(String(board), ".kanban", PENDING_FILE);
+      const pending = loadState(pendingFile);
+      // Налярд мог дойти позже, уже после неудачной попытки: такой след не нужен.
+      for (const key of Object.keys(pending)) {
+        if (state[key]) delete pending[key];
+      }
       const announce = (before, next) => {
         let notices = [];
         try {
@@ -179,9 +188,25 @@ export function apply(ctx, config = {}) {
           const key = deliveryKey(next.get(item.cardId), item.status);
           if (state[key]) continue;
           void deliver(ctx, item).then((accepted) => {
-            if (!accepted) return;
+            if (!accepted) {
+              // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
+              // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
+              pending[key] = {
+                cardId: item.cardId,
+                status: item.status,
+                sessionId: item.sessionId,
+                text: item.text,
+                at: new Date().toISOString(),
+              };
+              saveState(pendingFile, pending);
+              return;
+            }
             state[key] = new Date().toISOString();
             saveState(stateFile, state);
+            if (pending[key]) {
+              delete pending[key];
+              saveState(pendingFile, pending);
+            }
           });
         }
       };
@@ -194,6 +219,16 @@ export function apply(ctx, config = {}) {
             announce(new Map(), previous);
           } catch (error) {
             log(ctx, "warn", `не разобрал стартовое состояние доски: ${error?.message ?? error}`);
+          }
+          // Прошлый запуск не смог доставить наряд — пробуем снова.
+          for (const [key, item] of Object.entries(pending)) {
+            void deliver(ctx, item).then((accepted) => {
+              if (!accepted) return;
+              state[key] = new Date().toISOString();
+              saveState(stateFile, state);
+              delete pending[key];
+              saveState(pendingFile, pending);
+            });
           }
         }, catchUpMs),
       );

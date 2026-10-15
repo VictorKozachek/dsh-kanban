@@ -246,5 +246,31 @@ await check("карточка, ждущая роль, объявляется п�
   ctx.pick("dispose")();
 });
 
+await check("недоставленный наряд повторяется при следующем запуске", async () => {
+  const board = makeBoard([["002", "in-review", { owner: "sess-worker" }]]);
+  const failing = makeCtx([], "session/agent-busy");
+  apply(failing, { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 30, debounceMs: 20 });
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  await waitFor(() => fs.existsSync(pendingFile));
+  assert.deepEqual(stateKeys(board), [], "недоставленное не помечается доставленным");
+  failing.pick("dispose")();
+
+  const calls = [];
+  const good = makeCtx(calls);
+  apply(good, { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 30, debounceMs: 20 });
+  await waitFor(() => calls.length > 0);
+  assert.equal(calls[0]?.sessionId, "sess-reviewer");
+  await waitFor(() => stateKeys(board).length > 0);
+  good.pick("dispose")();
+
+  // Третий запуск: наряд доставлен и записан — повторять нечего.
+  const againCalls = [];
+  const again = makeCtx(againCalls);
+  apply(again, { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 30, debounceMs: 20 });
+  await sleep(250);
+  assert.equal(againCalls.length, 0, `наряд ушёл повторно: ${againCalls.length}`);
+  again.pick("dispose")();
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);
