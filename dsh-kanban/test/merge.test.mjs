@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-import { isNewer as coreIsNewer } from "../lib/watcher-core.js";
+import { isNewer as coreIsNewer, normalizeStatus as coreNormalize, parseCard as coreParseCard } from "../lib/watcher-core.js";
 
 const source = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
 let entry = null;
@@ -38,6 +38,8 @@ const plugin = entry.factory((name) => {
   throw new Error("неожиданный require: " + name);
 });
 const clientIsNewer = plugin.__internals.isNewer;
+const clientNormalize = plugin.__internals.normalizeStatus;
+const clientParseCard = plugin.__internals.parseCard;
 
 let passed = 0;
 let failed = 0;
@@ -78,6 +80,38 @@ for (const [name, candidate, current, expected] of CASES) {
     assert.equal(fromCore, expected, `ожидалось ${expected}`);
   });
 }
+
+// Статус на доске терпим к регистру, пробелам и синонимам — дамп обязан совпадать.
+const STATUS_CASES = [
+  "todo", "in-progress", "in-review", "testing", "ready", "merged", "blocked",
+  "ready ", "  merged  ", "In Review", "IN_PROGRESS", "in_progress", "wip", "doing",
+  "done", "заблокировано", "ревью", "тестирование", "слито", "hold", "closed",
+  "нечто-своё", "", null
+];
+
+check("нормализация статуса совпадает с плагином", () => {
+  for (const value of STATUS_CASES) {
+    assert.equal(coreNormalize(value), clientNormalize(value), `на ${JSON.stringify(value)}`);
+  }
+});
+
+const CARD_TEXTS = [
+  '---\nid: "001"\nstatus: "ready "\ntitle: Пробельный статус\n---\n',
+  '---\nid: "002"\nstatus: In Review\ntitle: Регистр\n---\n',
+  '---\nid: "003"\nstatus: заблокировано\ntitle: Синоним\n---\n',
+  '---\nid: "004"\nstatus: wip\ntitle: Без кавычек\nupdated: 2026-10-15T10:00:00Z\n---\n'
+];
+
+// Сверяем не сырое значение, а колонку: каждая половина читает карточку сама и
+// нормализует статус своей копией правила. У половин разные подписи парсера
+// (клиентской нужен ещё имя файла), поэтому колонка — общая точка сравнения.
+check("колонка карточки совпадает с плагином", () => {
+  for (const text of CARD_TEXTS) {
+    const fromCore = coreNormalize(coreParseCard(text).status);
+    const fromClient = clientNormalize(clientParseCard("001.md", text).status);
+    assert.equal(fromCore, fromClient, `на ${JSON.stringify(text.slice(0, 30))}`);
+  }
+});
 
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);

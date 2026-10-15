@@ -801,6 +801,26 @@ if "$ROOT/bin/board-status.sh" --help >"$WORK/out63" 2>&1 && grep -q "bin/board-
 else
   fail "справка: $(head -1 "$WORK/out63")"
 fi
+# Доска терпима к статусам: дамп обязан показывать те же колонки.
+printf -- "---\nid: \"003\"\nstatus: \"ready \"\ntitle: Пробельный статус\n---\n" > "$dump_repo/.kanban/tasks/003.md"
+printf -- "---\nid: \"004\"\nstatus: wip\ntitle: Синоним\n---\n" > "$dump_repo/.kanban/tasks/004.md"
+if "$ROOT/bin/board-status.sh" --root "$dump_repo" --json >"$WORK/out64" 2>&1; then
+  columns="$("$ROOT/bin/node.sh" -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const m={};for(const c of d.cards)m[c.id]=c.status;console.log([m['003'],m['004']].join(','))" "$WORK/out64")"
+  if [[ "$columns" == "ready,in-progress" ]]; then
+    pass "дамп нормализует статус как доска (ready с пробелом, wip)"
+  else
+    fail "колонки: $columns"
+  fi
+else
+  fail "json упал: $(head -1 "$WORK/out64")"
+fi
+code=0
+"$ROOT/bin/board-status.sh" --root --json >"$WORK/out65" 2>&1 || code=$?
+if [[ "$code" == "2" ]] && grep -q "начинается с «-»" "$WORK/out65"; then
+  pass "дефисное значение --root отвергнуто с подсказкой"
+else
+  fail "код $code, вывод: $(head -1 "$WORK/out65")"
+fi
 if "$ROOT/bin/board-status.sh" --json >"$WORK/out60" 2>&1 &&
   "$ROOT/bin/node.sh" -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!Array.isArray(d.cards)||!d.cards.length) process.exit(1)" "$WORK/out60"; then
   pass "--json отдаёт карточки машинно"

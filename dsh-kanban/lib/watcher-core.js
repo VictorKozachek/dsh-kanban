@@ -23,6 +23,62 @@ const FIELDS = ["id", "title", "status", "owner", "role", "updated"];
  * @param text - содержимое файла карточки.
  * @returns Объект с полями из front matter (без кавычек) и флагом `broken`.
  */
+/**
+ * Канонические колонки доски — те же id, что в `COLUMNS` клиентской половины.
+ */
+export const COLUMN_IDS = ["todo", "in-progress", "in-review", "testing", "ready", "merged", "blocked"];
+
+/**
+ * Нормализация статуса: та же логика, что в клиентской половине
+ * (`lib/client.js`, `__internals.normalizeStatus`) — регистр, пробелы и синонимы
+ * (`in_progress`, `wip`, `done`, «заблокировано»). Половинки живут в разных
+ * модульных системах, поэтому копий две; их согласие проверяет `test/merge.test.mjs`.
+ */
+export const STATUS_ALIASES = {
+  todo: "todo",
+  backlog: "todo",
+  new: "todo",
+  "нужно-сделать": "todo",
+  "in-progress": "in-progress",
+  in_progress: "in-progress",
+  progress: "in-progress",
+  wip: "in-progress",
+  doing: "in-progress",
+  active: "in-progress",
+  "в-работе": "in-progress",
+  "in-review": "in-review",
+  in_review: "in-review",
+  inreview: "in-review",
+  "code-review": "in-review",
+  reviewing: "in-review",
+  "на-ревью": "in-review",
+  "ревью": "in-review",
+  testing: "testing",
+  review: "in-review",
+  test: "testing",
+  verify: "testing",
+  "на-проверке": "testing",
+  "тестирование": "testing",
+  ready: "ready",
+  "ready-to-merge": "ready",
+  done: "ready",
+  "готово": "ready",
+  merged: "merged",
+  "влито": "merged",
+  "слито": "merged",
+  closed: "merged",
+  blocked: "blocked",
+  hold: "blocked",
+  "заблокировано": "blocked"
+}
+
+export function normalizeStatus(raw) {
+  const value = String(raw == null ? "" : raw).trim().toLowerCase().replace(/\s+/g, "-");
+  if (value === "") return "todo";
+  if (STATUS_ALIASES[value]) return STATUS_ALIASES[value];
+  return COLUMN_IDS.indexOf(value) >= 0 ? value : "todo";
+}
+
 export function parseCard(text) {
   const lines = String(text ?? "").split(/\r?\n/);
   if (lines[0]?.trim() !== "---") return { broken: true };
@@ -56,6 +112,9 @@ export function snapshotCards(entries) {
     if (!String(name).endsWith(".md") || String(name) === "README.md") continue;
     const card = parseCard(text);
     if (card.broken) continue;
+    // Доска терпима к статусам (регистр, пробелы, синонимы), поэтому приводим их
+    // к каноническим здесь — на входе в снимок доски, как это делает GUI.
+    card.status = normalizeStatus(card.status);
     snapshot.set(String(card.id), card);
   }
   return snapshot;

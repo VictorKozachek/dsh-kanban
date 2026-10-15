@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isNewer, snapshotCards } from "../dsh-kanban/lib/watcher-core.js";
+import { isNewer, normalizeStatus, snapshotCards } from "../dsh-kanban/lib/watcher-core.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
@@ -34,6 +34,11 @@ for (let index = 0; index < args.length; index += 1) {
   if (args[index] === "--root") {
     if (index + 1 >= args.length) {
       console.error("--root требует значения: --root DIR");
+      process.exit(2);
+    }
+    if (String(args[index + 1]).startsWith("-")) {
+      console.error("--root: значение начинается с «-» — похоже, путь забыт.");
+      console.error("если путь правда начинается с дефиса, пишите --root=ПУТЬ");
       process.exit(2);
     }
     target = path.resolve(args[index + 1]);
@@ -86,11 +91,11 @@ if (fs.existsSync(worktreesDir)) {
   }
 }
 
-const known = new Set(COLUMNS.map(([status]) => status));
+// Статус нормализует общая с плагином функция: доска терпима к регистру,
+// пробелам и синонимам, поэтому и дамп обязан быть.
 const list = [...cards.values()].sort((left, right) => String(left.id).localeCompare(String(right.id)));
 for (const card of list) {
-  const status = known.has(String(card.status)) ? String(card.status) : "todo";
-  card.column = status;
+  card.column = normalizeStatus(card.status);
 }
 
 if (asJson) {
