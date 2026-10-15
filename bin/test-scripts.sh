@@ -754,6 +754,40 @@ else
   fail "код $code, вывод: $(head -1 "$WORK/out56")"
 fi
 
+echo "== дамп доски"
+if "$ROOT/bin/board-status.sh" >"$WORK/out58" 2>&1; then
+  if grep -q "^доска:" "$WORK/out58" && grep -q "in-review" "$WORK/out58" && grep -q "^  #[0-9]" "$WORK/out58"; then
+    pass "дамп доски печатает колонки и карточки"
+  else
+    fail "неожиданный вывод: $(head -3 "$WORK/out58")"
+  fi
+else
+  fail "дамп доски упал: $(cat "$WORK/out58")"
+fi
+# Фикстура самодостаточна: карточка в main и одноимённая в работе — как в проекте.
+dump_repo="$WORK/dumprepo"
+mkdir -p "$dump_repo/.kanban/tasks" "$dump_repo/worktrees/001/.kanban/tasks"
+printf -- "---\nid: \"001\"\nstatus: todo\ntitle: Карточка в ветке\n---\n" > "$dump_repo/.kanban/tasks/001.md"
+printf -- "---\nid: \"001\"\nstatus: in-progress\ntitle: Карточка в ветке\nowner: sess-a\nrole: worker\n---\n" > "$dump_repo/worktrees/001/.kanban/tasks/001.md"
+if "$ROOT/bin/board-status.sh" --root "$dump_repo" >"$WORK/out59" 2>&1 && grep -q "в ветке" "$WORK/out59" && grep -q "in-progress" "$WORK/out59"; then
+  pass "карточка из worktree помечена «в ветке» и берётся её статус"
+else
+  fail "нет отметки ветки: $(head -3 "$WORK/out59")"
+fi
+if "$ROOT/bin/board-status.sh" --json >"$WORK/out60" 2>&1 &&
+  "$ROOT/bin/node.sh" -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!Array.isArray(d.cards)||!d.cards.length) process.exit(1)" "$WORK/out60"; then
+  pass "--json отдаёт карточки машинно"
+else
+  fail "json: $(head -2 "$WORK/out60")"
+fi
+code=0
+"$ROOT/bin/board-status.sh" --root >"$WORK/out61" 2>&1 || code=$?
+if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out61"; then
+  pass "--root без значения: код 2 и подсказка"
+else
+  fail "код $code, вывод: $(head -1 "$WORK/out61")"
+fi
+
 echo "== набор совпадает с проектом-источником"
 if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
   pass "$(head -1 "$WORK/out40")"
