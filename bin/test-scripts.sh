@@ -883,6 +883,13 @@ else
   fail "сверка покраснела: $(tr '\n' ' ' < "$WORK/out66")"
 fi
 # Расхождение проверяем на закоммиченном пути: незакоммиченный справедливо пропускается.
+# Перенос из грязного источника, затем сверка: незакоммиченное у источника не шумит.
+if ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" >/dev/null 2>&1 ) &&
+   ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out68" 2>&1 ); then
+  pass "после переноса из грязного источника сверка зелёная"
+else
+  fail "сверка после переноса: $(tr '\n' ' ' < "$WORK/out68")"
+fi
 printf 'версия 2\n' > "$dirty_dst/bin/two.sh"
 code=0
 ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out67" 2>&1 ) || code=$?

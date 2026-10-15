@@ -109,9 +109,39 @@ for path in "${PATHS[@]}"; do
   fi
   if (( CHECK == 1 )); then
     if [[ -d "$compare_from/$path" ]]; then
-      [[ -d "$ROOT/$path" ]] && diff -rq "$compare_from/$path" "$ROOT/$path" >/dev/null 2>&1 || diverged="$diverged $path"
+      if [[ ! -d "$ROOT/$path" ]]; then
+        diverged="$diverged $path"
+      else
+        # Пофайлово, а не diff по каталогу: незакоммиченные у источника пути надо
+        # пропускать точечно. Пропуск на уровне каталога отключал бы проверку всего
+        # каталога из-за одного грязного файла.
+        path_differs=0
+        while IFS= read -r rel; do
+          skip=0
+          for dirty in $dirty_paths; do
+            if [[ "$dirty" == "$path/$rel" ]]; then skip=1; fi
+          done
+          if (( skip == 1 )); then continue; fi
+          cmp -s "$compare_from/$path/$rel" "$ROOT/$path/$rel" || path_differs=1
+        done < <(cd "$compare_from/$path" && find . -type f | sed 's|^\./||')
+        while IFS= read -r rel; do
+          skip=0
+          for dirty in $dirty_paths; do
+            if [[ "$dirty" == "$path/$rel" ]]; then skip=1; fi
+          done
+          if (( skip == 1 )); then continue; fi
+          if [[ ! -e "$compare_from/$path/$rel" ]]; then path_differs=1; fi
+        done < <(cd "$ROOT/$path" && find . -type f | sed 's|^\./||')
+        if (( path_differs == 1 )); then diverged="$diverged $path"; fi
+      fi
     else
-      cmp -s "$compare_from/$path" "$ROOT/$path" || diverged="$diverged $path"
+      skip=0
+      for dirty in $dirty_paths; do
+        if [[ "$dirty" == "$path" ]]; then skip=1; fi
+      done
+      if (( skip == 0 )); then
+        cmp -s "$compare_from/$path" "$ROOT/$path" || diverged="$diverged $path"
+      fi
     fi
   elif [[ -d "$FROM/$path" ]]; then
     mkdir -p "$ROOT/$path"
