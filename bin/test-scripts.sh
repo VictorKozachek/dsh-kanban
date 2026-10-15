@@ -835,6 +835,24 @@ else
   fail "код $code, вывод: $(head -1 "$WORK/out61")"
 fi
 
+echo "== таблица файлов не отстаёт от набора"
+# Проверяем те же строки таблицы, что и выше: файл набора, которого в ней нет, —
+# такая же ошибка, как путь, которого нет на диске (#033). Внутренние проверки
+# набора в таблицу не входят: их видно из bin/test.sh.
+table="$(awk '/^## Что лежит в проекте/{inside=1; next} inside && /^## /{exit} inside{print}' "$ROOT/KANBAN.md")"
+unlisted=""
+for path in $(cd "$ROOT" && ls bin/* dsh-kanban/lib/*.js dsh-kanban/test/*.mjs dsh-kanban/docs/*.mjs dsh-kanban/docs/*.py 2>/dev/null); do
+  case "$path" in
+    bin/test-scripts.sh) continue ;;
+  esac
+  printf '%s' "$table" | grep -q "\`$path\`" || unlisted="$unlisted $path"
+done
+if [[ -z "$unlisted" ]]; then
+  pass "каждый файл набора упомянут в таблице"
+else
+  fail "в таблице не упомянуты:$unlisted"
+fi
+
 echo "== набор совпадает с проектом-источником"
 if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
   pass "$(head -1 "$WORK/out40")"

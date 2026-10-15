@@ -35,7 +35,7 @@
 | `bin/task-new.sh` | Завести задачу: worktree + ветка + карточка внутри ветки |
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |
 | `bin/task-commit.sh` | Путь в `merged`: слияние ветки задачи с сообщением по правилу, а для работы, которая уже в `main`, — `--no-merge --reason` (пуш — руками) |
-| `bin/board-status.sh` | Дамп доски: колонки, карточки, отметка «в ветке», `--json` (разбор — из плагина) |
+| `bin/board-status.sh`, `bin/board-status.mjs` | Дамп доски: колонки, карточки, отметка «в ветке», `--json` (разбор — из плагина) |
 | `dsh-kanban/test/mockup.test.mjs` | Проверки генератора HTML-макета (единицы, значок ветки, нулевой расход) |
 | `dsh-kanban/test/merge.test.mjs` | Согласие половинок плагина на правиле «какая запись свежее» |
 | `dsh-kanban/docs/check-mockup.py` | Поведенческие проверки painter'а (высота карточки, предел чипа) |
@@ -49,7 +49,7 @@
 | `bin/install-presets.sh` | Поставить пресеты ролей в патч-слой профиля (в этой версии DSH каталог `~/.dsh/.agent-presets` не читается) |
 | `bin/render-mockup.sh` | Перерисовать макет доски в PNG |
 | `dsh-kanban/docs/board-mockup-*.png` | Макеты: доска в панели и целиком, тёмная и светлая тема |
-| `dsh-kanban/docs/build-mockup.mjs`, `dsh-kanban/docs/render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
+| `dsh-kanban/docs/build-mockup.mjs`, `dsh-kanban/docs/dump-styles.mjs`, `dsh-kanban/docs/render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
 
 > `README.md` проекта — заметки самого проекта, набор их не трогает.
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
