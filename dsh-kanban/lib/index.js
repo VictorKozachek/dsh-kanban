@@ -176,6 +176,38 @@ export function apply(ctx, config = {}) {
       for (const key of Object.keys(pending)) {
         if (state[key]) delete pending[key];
       }
+      // Ключи, наряды по которым уже в полёте: файл состояния пишется только после
+      // успешной доставки, поэтому без этого набора два обхода (стартовый и по
+      // появлению роли, или стартовый и повтор недоставленного) успевают запланировать
+      // один и тот же наряд дважды.
+      const inFlight = new Set();
+      const deliverOnce = (key, item) => {
+        if (state[key] || inFlight.has(key)) return;
+        inFlight.add(key);
+        void deliver(ctx, item).then((accepted) => {
+          inFlight.delete(key);
+          if (!accepted) {
+            // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
+            // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
+            pending[key] = {
+              cardId: item.cardId,
+              status: item.status,
+              sessionId: item.sessionId,
+              text: item.text,
+              at: new Date().toISOString(),
+            };
+            saveState(pendingFile, pending);
+            return;
+          }
+          state[key] = new Date().toISOString();
+          saveState(stateFile, state);
+          if (pending[key]) {
+            delete pending[key];
+            saveState(pendingFile, pending);
+          }
+        });
+      };
+
       const announce = (before, next) => {
         let notices = [];
         try {
@@ -185,29 +217,7 @@ export function apply(ctx, config = {}) {
           return;
         }
         for (const item of notices) {
-          const key = deliveryKey(next.get(item.cardId), item.status);
-          if (state[key]) continue;
-          void deliver(ctx, item).then((accepted) => {
-            if (!accepted) {
-              // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
-              // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
-              pending[key] = {
-                cardId: item.cardId,
-                status: item.status,
-                sessionId: item.sessionId,
-                text: item.text,
-                at: new Date().toISOString(),
-              };
-              saveState(pendingFile, pending);
-              return;
-            }
-            state[key] = new Date().toISOString();
-            saveState(stateFile, state);
-            if (pending[key]) {
-              delete pending[key];
-              saveState(pendingFile, pending);
-            }
-          });
+          deliverOnce(deliveryKey(next.get(item.cardId), item.status), item);
         }
       };
 
@@ -220,15 +230,11 @@ export function apply(ctx, config = {}) {
           } catch (error) {
             log(ctx, "warn", `не разобрал стартовое состояние доски: ${error?.message ?? error}`);
           }
-          // Прошлый запуск не смог доставить наряд — пробуем снова.
+          // Прошлый запуск не смог доставить наряд — пробуем снова. Идём через тот
+          // же deliverOnce: если объявление выше уже взяло наряд в работу, повтор
+          // не отправит второе сообщение.
           for (const [key, item] of Object.entries(pending)) {
-            void deliver(ctx, item).then((accepted) => {
-              if (!accepted) return;
-              state[key] = new Date().toISOString();
-              saveState(stateFile, state);
-              delete pending[key];
-              saveState(pendingFile, pending);
-            });
+            deliverOnce(key, item);
           }
         }, catchUpMs),
       );

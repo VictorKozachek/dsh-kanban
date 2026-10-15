@@ -67,7 +67,7 @@ function makeBoard(cards) {
   return board;
 }
 
-function makeCtx(calls, failure = null) {
+function makeCtx(calls, failure = null, delayMs = 0) {
   const handlers = new Map();
   return {
     logger: () => ({ info: () => {}, warn: () => {} }),
@@ -75,6 +75,7 @@ function makeCtx(calls, failure = null) {
     pick: (name) => handlers.get(name),
     sessionController: {
       prompt: async (request) => {
+        if (delayMs) await sleep(delayMs);
         if (failure) throw new Error(failure);
         calls.push(request);
         return { accepted: true };
@@ -270,6 +271,35 @@ await check("недоставленный наряд повторяется пр
   await sleep(250);
   assert.equal(againCalls.length, 0, `наряд ушёл повторно: ${againCalls.length}`);
   again.pick("dispose")();
+});
+
+await check("медленная доставка и обход по роли не дублируют наряд", async () => {
+  const board = makeBoard([["005", "testing", { owner: "sess-worker" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls, null, 200);
+  apply(ctx, { boards: [board], catchUpMs: 60, debounceMs: 20 });
+  // Событие приходит раньше стартового обхода — как при старте профиля.
+  ctx.pick("agent-preset/selected")("S-RACE", "verifier");
+  await sleep(500);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  assert.equal(calls[0]?.sessionId, "S-RACE");
+  ctx.pick("dispose")();
+});
+
+await check("стартовый обход и повтор недоставленного не дублируют наряд", async () => {
+  const board = makeBoard([["006", "testing", { owner: "sess-worker" }]]);
+  const failing = makeCtx([], "session/agent-busy");
+  apply(failing, { boards: [board], roles: { verifier: "sess-verifier" }, catchUpMs: 30, debounceMs: 20 });
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  await waitFor(() => fs.existsSync(pendingFile));
+  failing.pick("dispose")();
+
+  const calls = [];
+  const good = makeCtx(calls);
+  apply(good, { boards: [board], roles: { verifier: "sess-verifier" }, catchUpMs: 30, debounceMs: 20 });
+  await sleep(250);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  good.pick("dispose")();
 });
 
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
