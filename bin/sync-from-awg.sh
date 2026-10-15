@@ -4,6 +4,10 @@
 #
 #   bin/sync-from-awg.sh              # скопировать набор из источника
 #   bin/sync-from-awg.sh --check      # только сверить и сказать, что разошлось
+#
+# Сверка сравнивает приёмник с зафиксированным состоянием источника (HEAD), поэтому
+# незакоммиченная работа в источнике не выглядит расхождением набора — о ней сообщается
+# отдельной строкой. Перенос по-прежнему копирует рабочее дерево источника.
 #   bin/sync-from-awg.sh --from DIR   # другой источник (по умолчанию ~/projects/awg)
 #
 # Лишнее в приёмнике убирает rsync (--delete). Если rsync нет, скрипт предупреждает
@@ -68,16 +72,42 @@ if [[ "$from_physical" == "$root_physical" ]]; then
   exit 0
 fi
 
+# Сверяемся с зафиксированным состоянием источника: незакоммиченная работа другой
+# сессии — это процесс, а не расхождение набора (её ловили в #027 и #030). Перенос
+# по-прежнему берёт рабочее дерево: он и нужен, чтобы забрать текущее содержимое.
+compare_from="$FROM"
+source_dirty=""
+if (( CHECK == 1 )) && git -C "$FROM" rev-parse --git-dir >/dev/null 2>&1; then
+  committed="$(mktemp -d)"
+  trap 'rm -rf "$committed"' EXIT
+  # Берём только те пути, что есть в HEAD: у набора бывают частичные копии.
+  in_head=()
+  for path in "${PATHS[@]}"; do
+    if git -C "$FROM" cat-file -e "HEAD:$path" 2>/dev/null; then
+      in_head+=("$path")
+    fi
+  done
+  if (( ${#in_head[@]} > 0 )) && git -C "$FROM" archive HEAD -- "${in_head[@]}" 2>/dev/null | tar -x -C "$committed" 2>/dev/null; then
+    compare_from="$committed"
+    dirty_count="$(git -C "$FROM" status --porcelain -- "${PATHS[@]}" 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$dirty_count" != "0" ]]; then
+      source_dirty="$dirty_count"
+    fi
+  else
+    echo "предупреждение: не прочитал зафиксированное состояние источника — сверяю рабочее дерево" >&2
+  fi
+fi
+
 diverged=""
 for path in "${PATHS[@]}"; do
-  if [[ ! -e "$FROM/$path" ]]; then
+  if [[ ! -e "$compare_from/$path" ]]; then
     continue
   fi
   if (( CHECK == 1 )); then
-    if [[ -d "$FROM/$path" ]]; then
-      [[ -d "$ROOT/$path" ]] && diff -rq "$FROM/$path" "$ROOT/$path" >/dev/null 2>&1 || diverged="$diverged $path"
+    if [[ -d "$compare_from/$path" ]]; then
+      [[ -d "$ROOT/$path" ]] && diff -rq "$compare_from/$path" "$ROOT/$path" >/dev/null 2>&1 || diverged="$diverged $path"
     else
-      cmp -s "$FROM/$path" "$ROOT/$path" || diverged="$diverged $path"
+      cmp -s "$compare_from/$path" "$ROOT/$path" || diverged="$diverged $path"
     fi
   elif [[ -d "$FROM/$path" ]]; then
     mkdir -p "$ROOT/$path"
@@ -108,7 +138,12 @@ if (( CHECK == 1 )); then
     echo "перенесите правки: bin/sync-from-awg.sh" >&2
     exit 1
   fi
-  echo "набор совпадает с источником: $FROM"
+  if [[ -n "$source_dirty" ]]; then
+    echo "набор совпадает с источником $FROM (сверялось зафиксированное состояние)"
+    echo "  у источника $source_dirty незакоммиченных путей — это работа в процессе, не расхождение"
+  else
+    echo "набор совпадает с источником: $FROM"
+  fi
   exit 0
 fi
 

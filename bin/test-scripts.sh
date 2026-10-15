@@ -853,6 +853,42 @@ else
   fail "в таблице не упомянуты:$unlisted"
 fi
 
+# Сверка не должна краснеть из-за чужой незакоммиченной работы в источнике (#034).
+dirty_src="$WORK/dirty-src"; dirty_dst="$WORK/dirty-dst"
+for dir in "$dirty_src" "$dirty_dst"; do
+  mkdir -p "$dir/bin"
+  git -C "$dir" init -q >/dev/null 2>&1
+  cp "$ROOT/bin/sync-from-awg.sh" "$dir/bin/sync-from-awg.sh"
+  chmod +x "$dir/bin/sync-from-awg.sh"
+done
+printf 'версия 1\n' > "$dirty_src/bin/one.sh"
+git -C "$dirty_src" add -A >/dev/null 2>&1
+if ! git -C "$dirty_src" -c user.email=t@t -c user.name=t commit -qm "версия 1" >/dev/null 2>&1; then
+  fail "не удалось подготовить источник для проверки сверки"
+fi
+if ! git -C "$dirty_src" cat-file -e HEAD:bin/one.sh 2>/dev/null; then
+  fail "в источнике нет зафиксированного bin/one.sh — проверка была бы ложной"
+fi
+cp "$dirty_src/bin/one.sh" "$dirty_dst/bin/one.sh"
+printf 'незакоммиченная правка\n' > "$dirty_src/bin/one.sh"
+if ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out66" 2>&1 ); then
+  if grep -q "незакоммиченных" "$WORK/out66"; then
+    pass "сверка не краснеет из-за незакоммиченной работы источника"
+  else
+    pass "сверка прошла (о незакоммиченном не сообщено)"
+  fi
+else
+  fail "сверка покраснела: $(tr '\n' ' ' < "$WORK/out66")"
+fi
+printf 'версия 2\n' > "$dirty_dst/bin/one.sh"
+code=0
+( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out67" 2>&1 ) || code=$?
+if [[ "$code" == "1" ]] && grep -q "bin" "$WORK/out67"; then
+  pass "настоящее расхождение по-прежнему ловится"
+else
+  fail "код $code, вывод: $(tr '\n' ' ' < "$WORK/out67")"
+fi
+
 echo "== набор совпадает с проектом-источником"
 if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
   pass "$(head -1 "$WORK/out40")"
