@@ -740,6 +740,20 @@ else
 fi
 
 code=0
+( cd "$sync_dst" && ./bin/sync-from-awg.sh --from --check >"$WORK/out62" 2>&1 ) || code=$?
+if [[ "$code" == "2" ]] && grep -q "начинается с «-»" "$WORK/out62"; then
+  pass "--from --check отвергнут: путь забыт"
+else
+  fail "код $code, вывод: $(head -1 "$WORK/out62")"
+fi
+code=0
+( cd "$sync_dst" && ./bin/sync-from-awg.sh --from=--check >"$WORK/out63" 2>&1 ) || code=$?
+if [[ "$code" == "0" ]] && grep -q "источник набора не найден" "$WORK/out63"; then
+  pass "--from=--check остаётся честным значением"
+else
+  fail "код $code, вывод: $(head -1 "$WORK/out63")"
+fi
+code=0
 ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from= >"$WORK/out57" 2>&1 ) || code=$?
 if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out57"; then
   pass "пустой --from= тоже отвергнут"
