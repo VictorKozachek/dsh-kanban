@@ -129,6 +129,20 @@ function collectAttrs(node, name, out = []) {
   return out;
 }
 
+/** Найти первый узел, подходящий под условие. */
+function findNode(node, predicate) {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findNode(child, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (node.props && predicate(node)) return node;
+  return findNode(node.children, predicate);
+}
+
 /** Собрать объекты стилей узлов: по ним проверяем оформление. */
 function collectStyles(node, out = []) {
   if (!node || typeof node !== "object") return out;
@@ -267,12 +281,12 @@ async function renderBoard(remote) {
     loadBoard: (signal) => plugin.__internals.createLoader(remote)("session-1", signal)
   };
   const tree = await render(body, props);
-  return { captured, tree, text: collectText(tree).join(" | ") };
+  return { captured, tree, text: collectText(tree).join(" | "), body, props };
 }
 
 // ── проверки ─────────────────────────────────────────────────────────────────
 
-const { captured, tree, text } = await renderBoard(makeRemote());
+const { captured, tree, text, body, props } = await renderBoard(makeRemote());
 
 // Регистрация в контексте
 assert.equal(captured.tabTypes.length, 1, "должен регистрироваться ровно один тип таба");
@@ -341,6 +355,37 @@ assert.ok(
   countHandlers(tree, "onClick") >= 4,
   "у карточек должен быть обработчик клика: " + countHandlers(tree, "onClick")
 );
+
+// Клик по карточке: панель должна открыться именно на ней. Гоняем тот же таб
+// вручную, потому что render() сбрасывает состояние и клик не переживёт.
+mini.reset();
+let clickTree = null;
+let clicked = false;
+for (let pass = 0; pass < 12; pass += 1) {
+  mini.begin();
+  clickTree = resolve(mini.react.createElement(body, props));
+  mini.runEffects();
+  await new Promise((done) => setTimeout(done, 0));
+  if (!clicked) {
+    // Доска приходит от загрузчика асинхронно: кликаем, когда карточка появилась.
+    const cardNode = findNode(clickTree, (node) => node.props["data-kanban-card"] === "005");
+    if (cardNode) {
+      assert.equal(typeof cardNode.props.onClick, "function", "у карточки должен быть обработчик клика");
+      clicked = true;
+      cardNode.props.onClick();
+      continue;
+    }
+  }
+  if (!mini.isDirty()) break;
+}
+mini.cleanup();
+assert.deepEqual(
+  collectAttrs(clickTree, "data-kanban-details"),
+  ["005"],
+  "после клика панель должна открыться на выбранной карточке"
+);
+const panelText = collectText(clickTree).join(" | ");
+assert.ok(panelText.includes("Инсталлятор пресетов"), "в панели должна быть карточка 005: " + panelText);
 
 const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
 assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
