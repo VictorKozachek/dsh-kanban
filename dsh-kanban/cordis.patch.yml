@@ -13,7 +13,7 @@
       config:
         # Корни проектов, где сторож следит за .kanban/tasks.
         boards:
-          - /Users/victor/projects/m-future
+          - /Users/victor/projects/dsh-kanban
         # id сессий ролей сторож подхватывает сам: DSH объявляет выбор пресета
         # событием agent-preset/selected, а карта «роль → сессия» живёт в
         # .kanban/.watcher-roles.json и переживает перезапуск. Блок `roles` нужен
