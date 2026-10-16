@@ -342,6 +342,15 @@ assert.ok(detailsText.includes("2026-10-15T10:00:00Z"), "у комментари
 assert.ok(detailsText.includes("in-progress"), "у комментария должен быть статус");
 assert.ok(detailsText.includes("tokens"), "в панели должен быть расход: " + detailsText);
 assert.equal(collectAttrs(detailsTree, "data-kanban-comment").length, 2, "должны быть оба комментария");
+assert.deepEqual(
+  collectAttrs(detailsTree, "data-kanban-comment"),
+  ["0", "1"],
+  "комментарии должны идти в порядке появления"
+);
+assert.ok(
+  detailsText.indexOf("взял в работу") < detailsText.indexOf("ревью без замечаний"),
+  "первый комментарий должен стоять раньше второго: " + detailsText
+);
 assert.equal(collectAttrs(detailsTree, "data-kanban-details")[0], "900", "панель должна знать свою карточку");
 
 // Карточки должны быть кликабельны: у каждой обработчик выбора.
@@ -356,36 +365,62 @@ assert.ok(
   "у карточек должен быть обработчик клика: " + countHandlers(tree, "onClick")
 );
 
-// Клик по карточке: панель должна открыться именно на ней. Гоняем тот же таб
+// Клик по карточке: панель открывается, переключается и закрывается. Гоняем таб
 // вручную, потому что render() сбрасывает состояние и клик не переживёт.
-mini.reset();
-let clickTree = null;
-let clicked = false;
-for (let pass = 0; pass < 12; pass += 1) {
-  mini.begin();
-  clickTree = resolve(mini.react.createElement(body, props));
-  mini.runEffects();
-  await new Promise((done) => setTimeout(done, 0));
-  if (!clicked) {
-    // Доска приходит от загрузчика асинхронно: кликаем, когда карточка появилась.
-    const cardNode = findNode(clickTree, (node) => node.props["data-kanban-card"] === "005");
-    if (cardNode) {
-      assert.equal(typeof cardNode.props.onClick, "function", "у карточки должен быть обработчик клика");
-      clicked = true;
-      cardNode.props.onClick();
-      continue;
+async function clickSequence(picks) {
+  mini.reset();
+  let result = null;
+  let index = 0;
+  // Проходы крутим до тишины: после последнего клика нужен ещё один рендер.
+  for (let pass = 0; pass < 24; pass += 1) {
+    mini.begin();
+    result = resolve(mini.react.createElement(body, props));
+    mini.runEffects();
+    await new Promise((done) => setTimeout(done, 0));
+    if (index < picks.length) {
+      const node = findNode(result, picks[index]);
+      if (node) {
+        assert.equal(typeof node.props.onClick, "function", "у выбранного узла должен быть обработчик клика");
+        index += 1;
+        node.props.onClick();
+        continue;
+      }
+    } else if (!mini.isDirty()) {
+      break;
     }
   }
-  if (!mini.isDirty()) break;
+  mini.cleanup();
+  assert.equal(index, picks.length, `не нашлись узлы для кликов: ${picks.length - index}`);
+  return result;
 }
-mini.cleanup();
+
+const cardPicker = (id) => (node) => node.props["data-kanban-card"] === id;
+const closePicker = (node) => node.props.type === "button" && node.props.title === props.t("close");
+
+const afterFirstClick = await clickSequence([cardPicker("005")]);
 assert.deepEqual(
-  collectAttrs(clickTree, "data-kanban-details"),
+  collectAttrs(afterFirstClick, "data-kanban-details"),
   ["005"],
   "после клика панель должна открыться на выбранной карточке"
 );
-const panelText = collectText(clickTree).join(" | ");
-assert.ok(panelText.includes("Инсталлятор пресетов"), "в панели должна быть карточка 005: " + panelText);
+assert.ok(
+  collectText(afterFirstClick).join(" | ").includes("Инсталлятор пресетов"),
+  "в панели должна быть карточка 005"
+);
+
+const afterSwitch = await clickSequence([cardPicker("005"), cardPicker("002")]);
+assert.deepEqual(
+  collectAttrs(afterSwitch, "data-kanban-details"),
+  ["002"],
+  "клик по другой карточке должен переключить панель"
+);
+
+const afterClose = await clickSequence([cardPicker("005"), closePicker]);
+assert.deepEqual(
+  collectAttrs(afterClose, "data-kanban-details"),
+  [],
+  "закрытие должно убрать панель"
+);
 
 const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
 assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
