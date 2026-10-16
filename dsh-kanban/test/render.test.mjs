@@ -129,6 +129,18 @@ function collectAttrs(node, name, out = []) {
   return out;
 }
 
+/** Собрать объекты стилей узлов: по ним проверяем оформление. */
+function collectStyles(node, out = []) {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    for (const child of node) collectStyles(child, out);
+    return out;
+  }
+  if (node.props && node.props.style && typeof node.props.style === "object") out.push(node.props.style);
+  collectStyles(node.children, out);
+  return out;
+}
+
 // ── загрузка плагина ─────────────────────────────────────────────────────────
 
 const source = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
@@ -273,6 +285,10 @@ assert.equal(tabType.title(""), "Канбан");
 assert.equal(tabType.guide.length, 1, "тип таба должен предлагать себя на странице-гиде");
 assert.ok(captured.dicts.kanban && captured.dicts.kanban.ru, "словари ru/en должны регистрироваться");
 assert.equal(captured.titles.length, 1, "заголовок таба должен регистрироваться");
+
+// Закрытые задачи: название зачёркнуто, и только у них (в фикстурах merged один).
+const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
+assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
 assert.equal(captured.titles[0].key, "dsh-kanban");
 
 // Отрисовка

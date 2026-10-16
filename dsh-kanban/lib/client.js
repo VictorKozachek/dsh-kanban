@@ -428,6 +428,8 @@ window.__ModuleLoader__.load({
       roleBadge: { fontSize: 10, padding: "1px 5px", borderRadius: 999, border: "1px solid " + HAIRLINE, opacity: 0.9, whiteSpace: "nowrap" },
       ownerEmpty: { marginLeft: "auto", fontSize: 10, opacity: 0.45 },
       cardTitle: { fontSize: 12, fontWeight: 500, wordBreak: "break-word" },
+      /** Название закрытой задачи: зачёркнуто, чтобы колонка merged читалась сразу. */
+      cardTitleMerged: { textDecoration: "line-through", opacity: 0.7 },
       meta: { fontSize: 10, opacity: 0.6, wordBreak: "break-all" },
       note: { fontSize: 10, color: "#f97316", wordBreak: "break-word" },
       empty: { padding: "14px 12px", opacity: 0.7, fontSize: 11, maxWidth: 420 },
@@ -480,7 +482,17 @@ window.__ModuleLoader__.load({
             ? h("span", { style: styles.owner, title: card.owner }, shortOwner(card.owner))
             : h("span", { style: styles.ownerEmpty }, t("noOwner"))
         ),
-        h("div", { key: "title", style: styles.cardTitle }, card.title)
+        h(
+          "div",
+          {
+            key: "title",
+            style:
+              card.status === "merged"
+                ? Object.assign({}, styles.cardTitle, styles.cardTitleMerged)
+                : styles.cardTitle
+          },
+          card.title
+        )
       ];
       if (card.branch) children.push(h("div", { key: "branch", style: styles.meta }, card.branch));
       if (hasTokens(card)) {
