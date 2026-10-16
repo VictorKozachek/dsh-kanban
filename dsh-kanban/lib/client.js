@@ -183,7 +183,16 @@ window.__ModuleLoader__.load({
           current = { at: start[1], status: start[2].trim(), lines: start[3] ? [start[3]] : [] };
           continue;
         }
-        if (current) current.lines.push(line);
+        if (current) {
+          // Раздел карточки закрывает комментарий: между записями у нас пишут отчёты
+          // («## Сделано», «## Раунд 2»), и они не текст роли.
+          if (/^##\s/.test(line)) {
+            comments.push(current);
+            current = null;
+            continue;
+          }
+          current.lines.push(line);
+        }
       }
       if (current) comments.push(current);
       for (const comment of comments) {

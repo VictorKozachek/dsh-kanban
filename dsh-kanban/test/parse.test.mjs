@@ -120,6 +120,35 @@ assert.equal(
 assert.equal(multiCard.comments[1].text, "Короткий второй комментарий.");
 assert.equal(multiCard.comments[1].status, "ready");
 
+// Раздел между записями не должен вклеиваться в комментарий (находка ревьювера:
+// блок тянулся до следующей записи и вбирал отчёты, 15% записей на доске).
+const withSection = [
+  "---",
+  'id: "902"',
+  "title: С разделом",
+  "status: in-review",
+  "---",
+  "",
+  "## Задача",
+  "Описание.",
+  "",
+  "## Заметки",
+  "",
+  "- 2026-10-15T12:00:00Z [in-review]",
+  "Комментарий роли.",
+  "",
+  "## Сделано",
+  "Отчёт исполнителя, к комментарию не относится.",
+  ""
+].join("\n");
+const sectionCard = plugin.__internals.parseCard("902.md", withSection);
+assert.equal(sectionCard.comments.length, 1, "должен быть один комментарий");
+assert.equal(sectionCard.comments[0].text, "Комментарий роли.", "раздел не должен попадать в комментарий");
+assert.ok(
+  !sectionCard.comments[0].text.includes("Отчёт исполнителя"),
+  "текст раздела не должен вклеиваться в комментарий"
+);
+
 assert.equal(normalizeStatus(""), "todo");
 assert.equal(normalizeStatus("in_progress"), "in-progress");
 assert.equal(normalizeStatus("In Progress"), "in-progress");
