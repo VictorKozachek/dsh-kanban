@@ -47,6 +47,39 @@ assert.ok(plugin.inject.includes("sidebarRightTabs"), "в inject нет серв
 const { parseCard, normalizeStatus, createLoader, COLUMNS } = plugin.__internals;
 
 // --- статусы ----------------------------------------------------------------
+// Тело карточки: описание и комментарии ролей для панели деталей.
+const withNotes = [
+  "---",
+  'id: "900"',
+  "title: С комментариями",
+  "status: in-review",
+  "---",
+  "",
+  "## Задача",
+  "Сделать панель деталей.",
+  "",
+  "## Критерии готовности",
+  "- [ ] панель открывается",
+  "",
+  "## Заметки",
+  "",
+  "- 2026-10-15T10:00:00Z [in-progress]",
+  "  взял в работу, смотрю код",
+  "",
+  "- 2026-10-15T11:30:00Z [in-review]",
+  "  ревью: замечаний нет",
+  ""
+].join("\n");
+const parsedCard = plugin.__internals.parseCard("900.md", withNotes);
+assert.equal(parsedCard.description, "Сделать панель деталей.", "описание должно браться из раздела «Задача»");
+assert.equal(parsedCard.comments.length, 2, "должны найтись оба комментария");
+assert.equal(parsedCard.comments[0].at, "2026-10-15T10:00:00Z");
+assert.equal(parsedCard.comments[0].status, "in-progress");
+assert.equal(parsedCard.comments[0].text, "взял в работу, смотрю код");
+assert.equal(parsedCard.comments[1].status, "in-review");
+assert.equal(parsedCard.comments[1].text, "ревью: замечаний нет");
+assert.equal(plugin.__internals.splitCardBody("").comments.length, 0, "пустое тело — без комментариев");
+
 assert.equal(normalizeStatus(""), "todo");
 assert.equal(normalizeStatus("in_progress"), "in-progress");
 assert.equal(normalizeStatus("In Progress"), "in-progress");

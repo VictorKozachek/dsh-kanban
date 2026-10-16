@@ -162,6 +162,27 @@ window.__ModuleLoader__.load({
     }
 
     /** Собрать карточку из имени файла и его текста. */
+    /**
+     * Разделить тело карточки на описание и комментарии ролей. Комментарий — блок,
+     * который начинается строкой `- <ISO-дата> [<статус>]`; описание — текст под
+     * заголовком «## Задача», иначе всё, что идёт до первого раздела.
+     */
+    function splitCardBody(rawBody) {
+      const body = String(rawBody || "").replace(/\r\n/g, "\n");
+      const comments = [];
+      const pattern = /^-\s*(\d{4}-\d{2}-\d{2}T[\d:]+Z?)\s*\[([^\]]+)\]\s*\n?([\s\S]*?)(?=\n-\s*\d{4}-\d{2}-\d{2}T|$)/gm;
+      for (const match of body.matchAll(pattern)) {
+        comments.push({ at: match[1], status: match[2].trim(), text: (match[3] || "").trim() });
+      }
+      const taskSection = /^##\s*Задача\s*\n([\s\S]*?)(?=\n##\s|$)/m.exec(body);
+      const description = (taskSection ? taskSection[1] : body.split(/\n##\s/)[0])
+        .split("\n")
+        .filter((line) => !/^\s*-\s*\d{4}-\d{2}-\d{2}T/.test(line))
+        .join("\n")
+        .trim();
+      return { description, comments };
+    }
+
     function parseCard(fileName, text) {
       const parsed = parseFrontMatter(text);
       const data = parsed.data;
@@ -181,7 +202,9 @@ window.__ModuleLoader__.load({
         branch: String(data.branch || ""),
         worktree: String(data.worktree || ""),
         updated: String(data.updated || data.updatedAt || ""),
-        note: String(data.blocked || data.note || data.reason || "")
+        note: String(data.blocked || data.note || data.reason || ""),
+        body: parsed.body,
+        ...splitCardBody(parsed.body)
       };
     }
 
@@ -740,7 +763,7 @@ window.__ModuleLoader__.load({
     exports.inject = inject;
     // Внутренности для тестов и генератора макета (dsh-kanban/test,
     // dsh-kanban/docs): рантайм DSH их не использует, браузеру они не мешают.
-    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, styles, COLUMNS };
+    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, splitCardBody, styles, COLUMNS };
     return module.exports;
   }
 });
