@@ -464,6 +464,8 @@ window.__ModuleLoader__.load({
       cardTitle: { fontSize: 12, fontWeight: 500, wordBreak: "break-word" },
       /** Название закрытой задачи: зачёркнуто, чтобы колонка merged читалась сразу. */
       cardTitleMerged: { textDecoration: "line-through", opacity: 0.7 },
+      /** Выбранная карточка: панель деталей справа показывает именно её. */
+      cardSelected: { outline: "1px solid currentColor", outlineOffset: 1, background: "color-mix(in srgb, currentColor 10%, transparent)" },
       meta: { fontSize: 10, opacity: 0.6, wordBreak: "break-all" },
       note: { fontSize: 10, color: "#f97316", wordBreak: "break-word" },
       empty: { padding: "14px 12px", opacity: 0.7, fontSize: 11, maxWidth: 420 },
@@ -572,7 +574,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function Card({ card, t }) {
+    function Card({ card, t, onSelect, selected }) {
       const column = COLUMN_BY_ID[card.status] || COLUMN_BY_ID.todo;
       const children = [
         h(
@@ -624,8 +626,24 @@ window.__ModuleLoader__.load({
       }
       if (card.note) children.push(h("div", { key: "note", style: styles.note, title: card.note }, clampText(card.note, 140)));
       if (card.updated) children.push(h("div", { key: "updated", style: styles.meta }, card.updated));
-      const style = Object.assign({}, styles.card, { borderLeftColor: column.color });
-      return h("article", { style, title: card.file, "data-kanban-card": card.id, "data-kanban-status": card.status }, children);
+      const style = Object.assign(
+        {},
+        styles.card,
+        { borderLeftColor: column.color },
+        selected ? styles.cardSelected : null,
+        onSelect ? { cursor: "pointer" } : null
+      );
+      return h(
+        "article",
+        {
+          style,
+          title: card.file,
+          "data-kanban-card": card.id,
+          "data-kanban-status": card.status,
+          onClick: onSelect ? () => onSelect(card.key) : undefined
+        },
+        children
+      );
     }
 
     /** Тело таба: шапка, предупреждения и колонки. */
@@ -644,6 +662,8 @@ window.__ModuleLoader__.load({
           : undefined;
 
       const [state, setState] = React.useState({ phase: "loading", cards: [], problems: [], truncated: false, error: "" });
+      // Какая карточка открыта в панели деталей (ключ — имя файла).
+      const [selectedKey, setSelectedKey] = React.useState(null);
       const signature = React.useRef("");
       const tickRef = React.useRef(null);
       const loadRef = React.useRef(loadBoard);
@@ -692,6 +712,7 @@ window.__ModuleLoader__.load({
         column,
         items: state.cards.filter((card) => card.status === column.id)
       }));
+      const selectedCard = state.cards.find((card) => card.key === selectedKey) || null;
       const workspaceLabel = cwd ? cwd.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || cwd : t("noWorkspace");
 
       const body = [];
@@ -742,10 +763,21 @@ window.__ModuleLoader__.load({
                   { style: styles.columnBody },
                   items.length === 0
                     ? h("div", { style: { opacity: 0.35, fontSize: 11 } }, "—")
-                    : items.map((card) => h(Card, { key: card.key, card, t }))
+                    : items.map((card) =>
+                        h(Card, {
+                          key: card.key,
+                          card,
+                          t,
+                          onSelect: setSelectedKey,
+                          selected: card.key === selectedKey
+                        })
+                      )
                 )
               )
-            )
+            ),
+            selectedCard
+              ? h(CardDetails, { key: "details", card: selectedCard, t, onClose: () => setSelectedKey(null) })
+              : null
           )
         );
       }

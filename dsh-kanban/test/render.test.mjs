@@ -330,6 +330,18 @@ assert.ok(detailsText.includes("tokens"), "в панели должен быть
 assert.equal(collectAttrs(detailsTree, "data-kanban-comment").length, 2, "должны быть оба комментария");
 assert.equal(collectAttrs(detailsTree, "data-kanban-details")[0], "900", "панель должна знать свою карточку");
 
+// Карточки должны быть кликабельны: у каждой обработчик выбора.
+function countHandlers(node, name) {
+  if (!node || typeof node !== "object") return 0;
+  if (Array.isArray(node)) return node.reduce((sum, child) => sum + countHandlers(child, name), 0);
+  const own = node.props && typeof node.props[name] === "function" ? 1 : 0;
+  return own + countHandlers(node.children, name);
+}
+assert.ok(
+  countHandlers(tree, "onClick") >= 4,
+  "у карточек должен быть обработчик клика: " + countHandlers(tree, "onClick")
+);
+
 const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
 assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
 assert.equal(captured.titles[0].key, "dsh-kanban");
