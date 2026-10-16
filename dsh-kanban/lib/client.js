@@ -163,24 +163,58 @@ window.__ModuleLoader__.load({
 
     /** Собрать карточку из имени файла и его текста. */
     /**
-     * Разделить тело карточки на описание и комментарии ролей. Комментарий — блок,
-     * который начинается строкой `- <ISO-дата> [<статус>]`; описание — текст под
-     * заголовком «## Задача», иначе всё, что идёт до первого раздела.
+     * Разделить тело карточки на описание и комментарии ролей.
+     *
+     * Разбираем построчно, а не регуляркой с ленивой группой: при флаге `m` знак `$`
+     * совпадает с концом любой строки, и такой группой текст обрывался на первом
+     * переносе — многоабзацные описания и комментарии терялись почти целиком.
+     *
+     * Описание — строки под заголовком «## Задача» (иначе всё до первого раздела).
+     * Комментарий — блок от строки `- <ISO-дата> [<статус>]` до следующей такой же.
      */
     function splitCardBody(rawBody) {
-      const body = String(rawBody || "").replace(/\r\n/g, "\n");
+      const lines = String(rawBody || "").replace(/\r\n/g, "\n").split("\n");
       const comments = [];
-      const pattern = /^-\s*(\d{4}-\d{2}-\d{2}T[\d:]+Z?)\s*\[([^\]]+)\]\s*\n?([\s\S]*?)(?=\n-\s*\d{4}-\d{2}-\d{2}T|$)/gm;
-      for (const match of body.matchAll(pattern)) {
-        comments.push({ at: match[1], status: match[2].trim(), text: (match[3] || "").trim() });
+      let current = null;
+      for (const line of lines) {
+        const start = /^-\s*(\d{4}-\d{2}-\d{2}T[\d:]+Z?)\s*\[([^\]]+)\]\s*(.*)$/.exec(line);
+        if (start) {
+          if (current) comments.push(current);
+          current = { at: start[1], status: start[2].trim(), lines: start[3] ? [start[3]] : [] };
+          continue;
+        }
+        if (current) current.lines.push(line);
       }
-      const taskSection = /^##\s*Задача\s*\n([\s\S]*?)(?=\n##\s|$)/m.exec(body);
-      const description = (taskSection ? taskSection[1] : body.split(/\n##\s/)[0])
-        .split("\n")
-        .filter((line) => !/^\s*-\s*\d{4}-\d{2}-\d{2}T/.test(line))
-        .join("\n")
-        .trim();
-      return { description, comments };
+      if (current) comments.push(current);
+      for (const comment of comments) {
+        comment.text = comment.lines.join("\n").trim();
+        delete comment.lines;
+      }
+
+      const hasTaskSection = lines.some((line) => /^##\s*Задача\s*$/.test(line));
+      const description = [];
+      if (hasTaskSection) {
+        let inside = false;
+        for (const line of lines) {
+          if (/^##\s/.test(line)) {
+            inside = /^##\s*Задача\s*$/.test(line);
+            continue;
+          }
+          if (inside) description.push(line);
+        }
+      } else {
+        for (const line of lines) {
+          if (/^##\s/.test(line)) break;
+          description.push(line);
+        }
+      }
+      return {
+        description: description
+          .filter((line) => !/^\s*-\s*\d{4}-\d{2}-\d{2}T/.test(line))
+          .join("\n")
+          .trim(),
+        comments
+      };
     }
 
     function parseCard(fileName, text) {
@@ -513,7 +547,7 @@ window.__ModuleLoader__.load({
           )
         );
       }
-      const who = [card.role ? roleLabel(card.role, t) : "", card.owner ? shortOwner(card.owner) : t("noOwner")]
+      const who = [card.role ? roleLabel(card.role, t) : "", card.owner || t("noOwner")]
         .filter(Boolean)
         .join(" · ");
       rows.push(

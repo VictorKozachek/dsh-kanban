@@ -80,6 +80,46 @@ assert.equal(parsedCard.comments[1].status, "in-review");
 assert.equal(parsedCard.comments[1].text, "ревью: замечаний нет");
 assert.equal(plugin.__internals.splitCardBody("").comments.length, 0, "пустое тело — без комментариев");
 
+// Многострочные описания и комментарии не должны обрезаться (находка тестировщика:
+// при флаге m знак $ совпадал с концом строки и ленивая группа рвалась).
+const multiline = [
+  "---",
+  'id: "901"',
+  "title: Многострочная",
+  "status: testing",
+  "---",
+  "",
+  "## Задача",
+  "Первая строка описания.",
+  "Вторая строка описания.",
+  "Третья строка описания.",
+  "",
+  "## Заметки",
+  "",
+  "- 2026-10-15T12:00:00Z [testing]",
+  "Первый абзац комментария.",
+  "",
+  "Второй абзац комментария.",
+  "",
+  "- 2026-10-15T13:00:00Z [ready]",
+  "Короткий второй комментарий.",
+  ""
+].join("\n");
+const multiCard = plugin.__internals.parseCard("901.md", multiline);
+assert.equal(
+  multiCard.description,
+  "Первая строка описания.\nВторая строка описания.\nТретья строка описания.",
+  "описание должно доехать целиком"
+);
+assert.equal(multiCard.comments.length, 2, "должны быть оба комментария");
+assert.equal(
+  multiCard.comments[0].text,
+  "Первый абзац комментария.\n\nВторой абзац комментария.",
+  "комментарий из двух абзацев должен доехать целиком"
+);
+assert.equal(multiCard.comments[1].text, "Короткий второй комментарий.");
+assert.equal(multiCard.comments[1].status, "ready");
+
 assert.equal(normalizeStatus(""), "todo");
 assert.equal(normalizeStatus("in_progress"), "in-progress");
 assert.equal(normalizeStatus("In Progress"), "in-progress");
