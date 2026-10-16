@@ -287,6 +287,49 @@ assert.ok(captured.dicts.kanban && captured.dicts.kanban.ru, "словари ru/
 assert.equal(captured.titles.length, 1, "заголовок таба должен регистрироваться");
 
 // Закрытые задачи: название зачёркнуто, и только у них (в фикстурах merged один).
+// Панель деталей: содержимое карточки с описанием и комментариями.
+const detailCard = plugin.__internals.parseCard(
+  "900.md",
+  [
+    "---",
+    'id: "900"',
+    "title: Панель деталей",
+    "status: in-review",
+    "owner: session-abcdefghijkl",
+    "role: reviewer",
+    'tokens: "6000"',
+    'tokens_reviewer: "6000"',
+    "---",
+    "",
+    "## Задача",
+    "Показать детали по клику.",
+    "",
+    "## Заметки",
+    "",
+    "- 2026-10-15T10:00:00Z [in-progress]",
+    "  взял в работу",
+    "",
+    "- 2026-10-15T11:30:00Z [in-review]",
+    "  ревью без замечаний",
+    ""
+  ].join("\n")
+);
+const detailsTree = await render(plugin.__internals.CardDetails, {
+  card: detailCard,
+  t: (key) => key,
+  onClose: () => {}
+});
+const detailsText = collectText(detailsTree).join(" | ");
+assert.ok(detailsText.includes("Панель деталей"), "в панели должно быть название задачи: " + detailsText);
+assert.ok(detailsText.includes("Показать детали по клику."), "в панели должно быть описание");
+assert.ok(detailsText.includes("взял в работу"), "в панели должен быть первый комментарий");
+assert.ok(detailsText.includes("ревью без замечаний"), "в панели должен быть второй комментарий");
+assert.ok(detailsText.includes("2026-10-15T10:00:00Z"), "у комментария должна быть дата");
+assert.ok(detailsText.includes("in-progress"), "у комментария должен быть статус");
+assert.ok(detailsText.includes("tokens"), "в панели должен быть расход: " + detailsText);
+assert.equal(collectAttrs(detailsTree, "data-kanban-comment").length, 2, "должны быть оба комментария");
+assert.equal(collectAttrs(detailsTree, "data-kanban-details")[0], "900", "панель должна знать свою карточку");
+
 const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
 assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
 assert.equal(captured.titles[0].key, "dsh-kanban");

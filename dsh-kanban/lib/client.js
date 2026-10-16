@@ -438,6 +438,17 @@ window.__ModuleLoader__.load({
       banner: { margin: "6px 10px 0", padding: "5px 8px", borderRadius: 6, fontSize: 11, background: "color-mix(in srgb, #ef4444 14%, transparent)", border: "1px solid color-mix(in srgb, #ef4444 35%, transparent)" },
       note: { margin: "6px 10px 0", padding: "5px 8px", borderRadius: 6, fontSize: 11, background: "color-mix(in srgb, #f59e0b 14%, transparent)", border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent)" },
       board: { display: "flex", gap: 8, padding: 8, flex: 1, minHeight: 0, alignItems: "flex-start", overflowX: "auto", overflowY: "hidden" },
+      /** Раскладка вкладки: доска слева, панель деталей справа. */
+      split: { display: "flex", flex: 1, minHeight: 0, gap: 8, alignItems: "stretch", overflow: "hidden" },
+      details: { flex: "0 0 300px", display: "flex", flexDirection: "column", gap: 6, padding: "8px 8px 8px 10px", borderLeft: "1px solid " + HAIRLINE, overflowY: "auto" },
+      detailsHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 },
+      detailsTitle: { fontSize: 13, fontWeight: 600, wordBreak: "break-word" },
+      detailsRow: { display: "flex", gap: 6, fontSize: 11, alignItems: "baseline", flexWrap: "wrap" },
+      detailsLabel: { opacity: 0.6 },
+      detailsText: { fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-word", opacity: 0.9 },
+      detailsSection: { fontSize: 11, fontWeight: 600, opacity: 0.75, marginTop: 2 },
+      comment: { borderLeft: "2px solid " + HAIRLINE, paddingLeft: 6, display: "flex", flexDirection: "column", gap: 2 },
+      commentHead: { display: "flex", gap: 6, fontSize: 10, opacity: 0.65, flexWrap: "wrap" },
       column: { flex: "0 0 auto", width: 232, maxHeight: "100%", display: "flex", flexDirection: "column", border: "1px solid " + HAIRLINE, borderRadius: 10, background: "color-mix(in srgb, currentColor 4%, transparent)", overflow: "hidden" },
       columnHeader: { display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderBottom: "1px solid " + HAIRLINE, fontSize: 11, letterSpacing: ".04em", textTransform: "uppercase", opacity: 0.85, flex: "0 0 auto" },
       dot: { width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto" },
@@ -480,6 +491,87 @@ window.__ModuleLoader__.load({
     }
 
     /** Одна карточка задачи. */
+    /**
+     * Панель деталей задачи: открывается кликом по карточке. Показывает название,
+     * расход токенов с разбивкой по ролям, роль и владельца-сессию, описание задачи
+     * и все комментарии ролей за время решения.
+     */
+    function CardDetails({ card, t, onClose }) {
+      const rows = [];
+      if (hasTokens(card)) {
+        const breakdown = Object.entries(card.usage || {})
+          .map(([role, value]) => role + ": " + formatTokens(value))
+          .join("; ");
+        rows.push(
+          h(
+            "div",
+            { key: "tokens", style: styles.detailsRow },
+            h("span", { style: styles.detailsLabel }, t("tokens") + ":"),
+            h("span", null, formatTokens(card.tokens) + (breakdown ? " (" + breakdown + ")" : ""))
+          )
+        );
+      }
+      const who = [card.role ? roleLabel(card.role, t) : "", card.owner ? shortOwner(card.owner) : t("noOwner")]
+        .filter(Boolean)
+        .join(" · ");
+      rows.push(
+        h(
+          "div",
+          { key: "who", style: styles.detailsRow },
+          h("span", { style: styles.detailsLabel }, t("session") + ":"),
+          h("span", { title: card.owner || "" }, who)
+        )
+      );
+      if (card.since) {
+        rows.push(
+          h(
+            "div",
+            { key: "since", style: styles.detailsRow },
+            h("span", { style: styles.detailsLabel }, t("since") + ":"),
+            h("span", null, card.since)
+          )
+        );
+      }
+
+      const comments = Array.isArray(card.comments) ? card.comments : [];
+      const commentNodes = comments.length
+        ? comments.map((comment, index) =>
+            h(
+              "div",
+              { key: "c" + index, style: styles.comment, "data-kanban-comment": String(index) },
+              h(
+                "div",
+                { style: styles.commentHead },
+                h("span", null, comment.at),
+                h("span", null, comment.status)
+              ),
+              h("div", { style: styles.detailsText }, comment.text)
+            )
+          )
+        : [h("div", { key: "none", style: styles.detailsText }, t("noComments"))];
+
+      return h(
+        "aside",
+        { style: styles.details, "data-kanban-details": String(card.id) },
+        h(
+          "div",
+          { style: styles.detailsHead },
+          h("div", { style: styles.detailsTitle }, card.title),
+          h(
+            "button",
+            { type: "button", style: styles.refresh, title: t("close"), onClick: () => onClose && onClose() },
+            "✕"
+          )
+        ),
+        h("div", { style: styles.detailsRow }, h("span", { style: styles.detailsLabel }, "#" + card.id)),
+        rows,
+        h("div", { style: styles.detailsSection }, t("description")),
+        h("div", { style: styles.detailsText }, card.description || "—"),
+        h("div", { style: styles.detailsSection }, t("comments") + " (" + comments.length + ")"),
+        commentNodes
+      );
+    }
+
     function Card({ card, t }) {
       const column = COLUMN_BY_ID[card.status] || COLUMN_BY_ID.todo;
       const children = [
@@ -674,6 +766,12 @@ window.__ModuleLoader__.load({
       inBranch: "в ветке",
       tokens: "токенов",
       since: "с",
+      details: "Детали задачи",
+      description: "Описание",
+      comments: "Комментарии",
+      noComments: "Комментариев пока нет",
+      session: "Сессия",
+      close: "Закрыть",
       "role.worker": "исполнитель",
       "role.reviewer": "ревьювер",
       "role.verifier": "тестировщик",
@@ -700,6 +798,12 @@ window.__ModuleLoader__.load({
       noOwner: "unassigned",
       inBranch: "in branch",
       tokens: "tokens",
+      details: "Card details",
+      description: "Description",
+      comments: "Comments",
+      noComments: "No comments yet",
+      session: "Session",
+      close: "Close",
       since: "since",
       "role.worker": "executor",
       "role.reviewer": "reviewer",
@@ -763,7 +867,7 @@ window.__ModuleLoader__.load({
     exports.inject = inject;
     // Внутренности для тестов и генератора макета (dsh-kanban/test,
     // dsh-kanban/docs): рантайм DSH их не использует, браузеру они не мешают.
-    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, splitCardBody, styles, COLUMNS };
+    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, splitCardBody, CardDetails, styles, COLUMNS };
     return module.exports;
   }
 });
