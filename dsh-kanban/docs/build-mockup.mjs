@@ -118,7 +118,9 @@ function cardHtml(card) {
       ? `<span style="${css(styles.owner)}" title="${escapeHtml(card.owner)}">${escapeHtml(shortOwner(card.owner))}</span>`
       : `<span style="${css(styles.ownerEmpty)}">не назначен</span>`,
     `</div>`,
-    `<div style="${css(styles.cardTitle)}">${escapeHtml(card.title)}</div>`
+    `<div style="${css(
+      card.status === "merged" ? Object.assign({}, styles.cardTitle, styles.cardTitleMerged) : styles.cardTitle
+    )}">${escapeHtml(card.title)}</div>`
   ];
   if (card.branch) parts.push(`<div style="${css(styles.meta)}">${escapeHtml(card.branch)}</div>`);
   if (hasTokens(card)) {

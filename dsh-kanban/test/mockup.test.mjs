@@ -109,6 +109,11 @@ check("генератор читает общий список карточек"
   assert.ok(html.includes(MARKER), "правка общего списка не доехала до HTML");
 });
 
+check("название слитой карточки зачёркнуто, как на доске", () => {
+  const struck = html.match(/line-through/g) || [];
+  assert.equal(struck.length, 1, `зачёркиваний ${struck.length}`);
+});
+
 check("значок «в ветке» есть у карточек из worktree", () => {
   assert.ok(html.includes("в ветке"), "нет значка «в ветке»");
 });

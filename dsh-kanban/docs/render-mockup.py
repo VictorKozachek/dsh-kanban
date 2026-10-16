@@ -431,8 +431,15 @@ def build_board(styles, columns, theme, cards, header_width):
                                 label, small_font, composite(text, 0.9, card_bg), anchor="mm")
             ty += max(card_id_font.size / SCALE * LINE_FACTOR, small_font.size / SCALE * LINE_FACTOR + 4) + card_gap
 
+            merged = card.get("status") == "merged"
             for line in wrap(scratch, card["title"], card_title_font, card_text_w, 2):
                 canvas.text(tx, ty, line, card_title_font, text)
+                if merged:
+                    # Зачёркивание, как у cardTitleMerged в плагине.
+                    strike_y = ty + card_title_font.size / SCALE * 0.42
+                    canvas.line(tx, strike_y,
+                                tx + measure(scratch, line, card_title_font), strike_y,
+                                composite(text, 0.7, card_bg), 1)
                 ty += card_title_font.size / SCALE * LINE_FACTOR
             if card.get("branch"):
                 ty += card_gap

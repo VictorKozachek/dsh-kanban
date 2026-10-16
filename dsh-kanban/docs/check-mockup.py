@@ -146,5 +146,30 @@ check("painter рисует все карточки общего списка", 
 parsed = [painter.format_tokens(value) for value in ("1e3", "1.5", "0x10", "1e9")]
 check("разбор расхода совпадает с JS", parsed == ["1,0k", "1.5", "16", "1,0G"], str(parsed))
 
+# 4. Макет должен повторять доску: у слитой карточки название зачёркнуто.
+def count_lines(cards):
+    seen = []
+    original = painter.Canvas.line
+
+    def spy(self, x0, y0, x1, y1, fill, width=1):
+        seen.append((x0, y0, x1, y1))
+        return original(self, x0, y0, x1, y1, fill, width)
+
+    painter.Canvas.line = spy
+    try:
+        painter.build_board(styles, columns, "dark", cards, 0)
+    finally:
+        painter.Canvas.line = original
+    return len(seen)
+
+
+demo_cards = json.loads((HERE / "demo-cards.json").read_text(encoding="utf-8"))
+without_merged = [dict(item, status="ready" if item["status"] == "merged" else item["status"]) for item in demo_cards]
+check(
+    "painter зачёркивает название слитой карточки",
+    count_lines(demo_cards) > count_lines(without_merged),
+    f"с merged {count_lines(demo_cards)} линий, без merged {count_lines(without_merged)}",
+)
+
 print(f"\nпроверок painter'а: {len(ok_names)} ок, провалов {failures}")
 sys.exit(1 if failures else 0)
