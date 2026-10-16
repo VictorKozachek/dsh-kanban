@@ -184,9 +184,11 @@ window.__ModuleLoader__.load({
           continue;
         }
         if (current) {
-          // Раздел карточки закрывает комментарий: между записями у нас пишут отчёты
-          // («## Сделано», «## Раунд 2»), и они не текст роли.
-          if (/^##\s/.test(line)) {
+          // Комментарий закрывают: раздел карточки («## Сделано», «## Раунд 2» — это
+          // отчёты, а не текст роли) и первая непустая строка без отступа — писатель
+          // (bin/task-move.sh) сдвигает строки заметки на два пробела, поэтому
+          // неподступленная строка это уже проза карточки.
+          if (/^##\s/.test(line) || (line.trim() !== "" && !/^\s/.test(line))) {
             comments.push(current);
             current = null;
             continue;
@@ -196,7 +198,12 @@ window.__ModuleLoader__.load({
       }
       if (current) comments.push(current);
       for (const comment of comments) {
-        comment.text = comment.lines.join("\n").trim();
+        // Отступ записи (два пробела от писателя) убираем: в панели текст должен
+        // читаться как обычный.
+        comment.text = comment.lines
+          .map((line) => line.replace(/^ {1,2}/, ""))
+          .join("\n")
+          .trim();
         delete comment.lines;
       }
 

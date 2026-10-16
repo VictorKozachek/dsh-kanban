@@ -97,12 +97,12 @@ const multiline = [
   "## Заметки",
   "",
   "- 2026-10-15T12:00:00Z [testing]",
-  "Первый абзац комментария.",
-  "",
-  "Второй абзац комментария.",
+  "  Первый абзац комментария.",
+  "  ",
+  "  Второй абзац комментария.",
   "",
   "- 2026-10-15T13:00:00Z [ready]",
-  "Короткий второй комментарий.",
+  "  Короткий второй комментарий.",
   ""
 ].join("\n");
 const multiCard = plugin.__internals.parseCard("901.md", multiline);
@@ -135,7 +135,7 @@ const withSection = [
   "## Заметки",
   "",
   "- 2026-10-15T12:00:00Z [in-review]",
-  "Комментарий роли.",
+  "  Комментарий роли.",
   "",
   "## Сделано",
   "Отчёт исполнителя, к комментарию не относится.",
@@ -144,6 +144,27 @@ const withSection = [
 const sectionCard = plugin.__internals.parseCard("902.md", withSection);
 assert.equal(sectionCard.comments.length, 1, "должен быть один комментарий");
 assert.equal(sectionCard.comments[0].text, "Комментарий роли.", "раздел не должен попадать в комментарий");
+// Проза карточки без заголовка и без отступа тоже не должна попадать в комментарий.
+const withProse = [
+  "---",
+  'id: "903"',
+  "title: С прозой",
+  "status: in-review",
+  "---",
+  "",
+  "## Заметки",
+  "",
+  "- 2026-10-15T14:00:00Z [in-review]",
+  "  Комментарий роли с отступом.",
+  "",
+  "Исходные заметки:",
+  "  - старая строка карточки",
+  ""
+].join("\n");
+const proseCard = plugin.__internals.parseCard("903.md", withProse);
+assert.equal(proseCard.comments.length, 1, "должен быть один комментарий");
+assert.equal(proseCard.comments[0].text, "Комментарий роли с отступом.", "проза без отступа не должна вклеиваться");
+
 assert.ok(
   !sectionCard.comments[0].text.includes("Отчёт исполнителя"),
   "текст раздела не должен вклеиваться в комментарий"
