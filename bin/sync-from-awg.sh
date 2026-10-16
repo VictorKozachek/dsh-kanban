@@ -5,6 +5,9 @@
 #   bin/sync-from-awg.sh              # скопировать набор из источника
 #   bin/sync-from-awg.sh --check      # только сверить и сказать, что разошлось
 #
+# Файл строки плагина хранит путь доски проекта, он у каждого свой:
+# сверка его не сравнивает.
+#
 # Сверка сравнивает приёмник с зафиксированным состоянием источника (HEAD), поэтому
 # незакоммиченная работа в источнике не выглядит расхождением набора — о ней сообщается
 # отдельной строкой. Перенос по-прежнему копирует рабочее дерево источника.
@@ -101,6 +104,8 @@ if (( CHECK == 1 )) && git -C "$FROM" rev-parse --git-dir >/dev/null 2>&1; then
   fi
 fi
 
+# Пути, которые у каждого проекта свои и в сверке не участвуют.
+LOCAL_PATHS=" dsh-kanban/cordis.patch.yml "
 diverged=""
 dirty_paths="${dirty_paths:-}"
 for path in "${PATHS[@]}"; do
@@ -117,6 +122,7 @@ for path in "${PATHS[@]}"; do
         # каталога из-за одного грязного файла.
         path_differs=0
         while IFS= read -r rel; do
+          case "$LOCAL_PATHS" in *" $path/$rel "*) continue ;; esac
           skip=0
           for dirty in $dirty_paths; do
             if [[ "$dirty" == "$path/$rel" ]]; then skip=1; fi
@@ -125,6 +131,7 @@ for path in "${PATHS[@]}"; do
           cmp -s "$compare_from/$path/$rel" "$ROOT/$path/$rel" || path_differs=1
         done < <(cd "$compare_from/$path" && find . -type f | sed 's|^\./||')
         while IFS= read -r rel; do
+          case "$LOCAL_PATHS" in *" $path/$rel "*) continue ;; esac
           skip=0
           for dirty in $dirty_paths; do
             if [[ "$dirty" == "$path/$rel" ]]; then skip=1; fi
