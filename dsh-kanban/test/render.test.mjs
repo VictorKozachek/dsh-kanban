@@ -422,6 +422,14 @@ assert.deepEqual(
   "закрытие должно убрать панель"
 );
 
+// Панель должна прокручиваться: высота ограничена высотой доски, иначе её обрезает
+// доска с overflowY: hidden, и вниз не доехать.
+const panelNode = findNode(afterFirstClick, (node) => node.props["data-kanban-details"] === "005");
+assert.ok(panelNode, "панель деталей должна быть найдена после клика");
+assert.equal(panelNode.props.style.overflowY, "auto", "у панели должна быть своя прокрутка");
+assert.equal(panelNode.props.style.alignSelf, "stretch", "панель должна растягиваться по высоте доски");
+assert.equal(panelNode.props.style.position, "sticky", "панель должна оставаться у правого края");
+
 const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
 assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
 assert.equal(captured.titles[0].key, "dsh-kanban");

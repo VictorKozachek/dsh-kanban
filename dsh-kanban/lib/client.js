@@ -483,7 +483,10 @@ window.__ModuleLoader__.load({
       board: { display: "flex", gap: 8, padding: 8, flex: 1, minHeight: 0, alignItems: "flex-start", overflowX: "auto", overflowY: "hidden" },
       /** Раскладка вкладки: доска слева, панель деталей справа. */
       split: { display: "flex", flex: 1, minHeight: 0, gap: 8, alignItems: "stretch", overflow: "hidden" },
-      details: { flex: "0 0 300px", display: "flex", flexDirection: "column", gap: 6, padding: "8px 8px 8px 10px", borderLeft: "1px solid " + HAIRLINE, overflowY: "auto" },
+      // Панель деталей: растягиваем по высоте доски (у доски alignItems: flex-start,
+      // иначе высота панели равна содержимому и прокрутка не включается) и пришпиливаем
+      // к правому краю, чтобы она не уезжала при горизонтальной прокрутке колонок.
+      details: { flex: "0 0 300px", alignSelf: "stretch", maxHeight: "100%", position: "sticky", right: 0, display: "flex", flexDirection: "column", gap: 6, padding: "8px 8px 8px 10px", borderLeft: "1px solid " + HAIRLINE, background: "canvas", overflowY: "auto" },
       detailsHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 },
       detailsTitle: { fontSize: 13, fontWeight: 600, wordBreak: "break-word" },
       detailsRow: { display: "flex", gap: 6, fontSize: 11, alignItems: "baseline", flexWrap: "wrap" },
