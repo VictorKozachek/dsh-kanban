@@ -17,6 +17,12 @@
  * От повторов при перезапусках спасает файл состояния: наряд помечается
  * отправленным для конкретной версии карточки (`id:status:updated`).
  *
+ * Кроме переходов, сторож закрывает поток `backlog` (`./backlog-notices.js`):
+ * асайн — карточка пришла в `todo` с владельцем — и пополнение — в `todo` стало
+ * меньше `minTodo` из `.kanban/board.json`. Недобор будит оркестратора один раз
+ * на состояние: файл состояния хранит ключ `board:refill:short`, пока `todo` не
+ * доберёт до минимума.
+ *
  * Конфиг (в строке плагина, `config`):
  *   boards: ["/путь/к/проекту"]      — где искать `.kanban/tasks`
  *   roles: { reviewer, verifier, dispatcher } — id сессий ролей
@@ -30,6 +36,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { deliveryKey, planNotices, snapshotCards } from "./watcher-core.js";
+import {
+  DEFAULT_MIN_TODO,
+  REFILL_KEY,
+  parseMinTodo,
+  planAssignmentNotices,
+  planRefillNotice,
+} from "./backlog-notices.js";
 
 /** Сервис, которым GUI отправляет сообщение в сессию. */
 export const inject = ["sessionController"];
@@ -86,6 +99,20 @@ function saveState(file, state) {
     fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
   } catch {
     /* состояние — подсказка, а не источник правды: не сохранилось, переживём */
+  }
+}
+
+/**
+ * Прочитать минимум карточек в `todo` из `.kanban/board.json`.
+ *
+ * Файла нет или он битый — считаем `DEFAULT_MIN_TODO` (1): доска обязана
+ * работать и без конфига.
+ */
+function readMinTodo(file) {
+  try {
+    return parseMinTodo(fs.readFileSync(file, "utf8"));
+  } catch {
+    return DEFAULT_MIN_TODO;
   }
 }
 
@@ -157,6 +184,10 @@ export function apply(ctx, config = {}) {
     for (const board of boards) {
       const tasksDir = path.join(String(board), ".kanban", "tasks");
       const stateFile = path.join(String(board), ".kanban", ".watcher-state.json");
+      // Минимум карточек в `todo` (`.kanban/board.json`): по нему решается, пора ли
+      // будить оркестратора. Читаем на каждый обход — конфиг может поправить сам
+      // оркестратор, а файл дешёвый.
+      const boardFile = path.join(String(board), ".kanban", "board.json");
       let previous = readSnapshot(tasksDir);
       if (previous === null) {
         log(ctx, "warn", `нет каталога карточек: ${tasksDir}`);
@@ -208,6 +239,41 @@ export function apply(ctx, config = {}) {
         });
       };
 
+      /**
+       * Сигнал о недоборе `todo`: один наряд на недобор, а не на каждый тик доски.
+       *
+       * Недобор — состояние доски, поэтому снимаем сигнал (ключ в файле состояния)
+       * ровно тогда, когда `todo` добрал до минимума: следующий недобор снова
+       * разбудит оркестратора.
+       */
+      const announceRefill = (next) => {
+        let plan;
+        try {
+          plan = planRefillNotice(next, { minTodo: readMinTodo(boardFile), dispatcher: roles.dispatcher });
+        } catch (error) {
+          log(ctx, "warn", `не разобрал пополнение todo: ${error?.message ?? error}`);
+          return;
+        }
+        if (plan.short) {
+          if (plan.notice) deliverOnce(REFILL_KEY, plan.notice);
+          return;
+        }
+        let stateDropped = false;
+        let pendingDropped = false;
+        if (state[REFILL_KEY]) {
+          delete state[REFILL_KEY];
+          stateDropped = true;
+        }
+        if (pending[REFILL_KEY]) {
+          // Недоставленный сигнал того же недобора: недобора больше нет — повторять
+          // нечего.
+          delete pending[REFILL_KEY];
+          pendingDropped = true;
+        }
+        if (stateDropped) saveState(stateFile, state);
+        if (pendingDropped) saveState(pendingFile, pending);
+      };
+
       const announce = (before, next) => {
         let notices = [];
         try {
@@ -216,9 +282,19 @@ export function apply(ctx, config = {}) {
           log(ctx, "warn", `не разобрал переходы доски: ${error?.message ?? error}`);
           return;
         }
-        for (const item of notices) {
-          deliverOnce(deliveryKey(next.get(item.cardId), item.status), item);
+        // Асайн из `backlog` (`todo` с владельцем) ядро не объявляет — это не переход
+        // статуса, а выдача задачи конкретному исполнителю.
+        try {
+          notices = notices.concat(planAssignmentNotices(before, next));
+        } catch (error) {
+          log(ctx, "warn", `не разобрал асайны доски: ${error?.message ?? error}`);
         }
+        for (const item of notices) {
+          // У асайна свой ключ: он учитывает владельца, иначе перепривязка в `todo`
+          // осталась бы без наряда.
+          deliverOnce(item.key ?? deliveryKey(next.get(item.cardId), item.status), item);
+        }
+        announceRefill(next);
       };
 
       // 1. Что уже ждёт роль: карточка могла зависнуть в in-review/testing/ready
