@@ -17,12 +17,21 @@
 # только что выданная в этом прогоне задача тоже считается занятостью — иначе
 # обе карточки уехали бы первому исполнителю.
 #
-# Карточки берутся из `backlog` по возрастанию id (FIFO) и выдаются переходом
-# `backlog → todo --owner <id>` через `bin/task-move.sh`: правила протокола
-# остаются в одном месте.
+# Занятость и счёт `todo`/`backlog` считаются по снимку доски: основной чекаут
+# `.kanban/tasks/*.md` плюс рабочие деревья `worktrees/*/.kanban/tasks/*.md` и
+# `.worktrees/*/.kanban/tasks/*.md`. Из дерева берётся только одноимённая
+# карточка `<id>.md`, а копии одной карточки сливаются по свежести `updated`
+# (равенство — в пользу дерева) — та же семантика, что у сторожа
+# (`dsh-kanban/lib/index.js`). Иначе исполнитель, у которого задача в работе
+# внутри дерева, выглядел бы свободным и получил бы вторую.
+#
+# Карточки к выдаче берутся из `backlog` основного чекаута по возрастанию id
+# (FIFO) и выдаются переходом `backlog → todo --owner <id>` через
+# `bin/task-move.sh`: правила протокола остаются в одном месте.
 #
 # Коды возврата: 0 — ок (в том числе «пополнять нечего»); 1 — ошибка конфига или
-# доски; 3 — выдать не удалось: backlog пуст или нет свободных исполнителей.
+# доски; 3 — выдать не удалось: backlog пуст, backlog исчерпан (выдали меньше,
+# чем не хватало) или нет свободных исполнителей.
 #
 set -euo pipefail
 
@@ -42,12 +51,17 @@ usage() {
 .kanban/board.json, по умолчанию 1), закрепляя их за свободными исполнителями из
 .kanban/.workers.json (fallback — worker из .kanban/.watcher-roles.json).
 
+Занятость считается по всем доскам проекта: основной чекаут и рабочие деревья
+(из дерева берётся только одноимённая карточка). Если backlog кончился раньше,
+чем набрался минимум, выдача честно пишет, сколько выдано и сколько недобрали.
+
   --dry-run   показать план и ничего не менять
   --min N     минимум на этот запуск
 
 Коды возврата: 0 — ок (включая «пополнять нечего»); 1 — ошибка конфига/доски;
-3 — выдать не удалось (backlog пуст или нет свободных исполнителей). --dry-run
-возвращает те же коды, что и обычный запуск: по нему видно, чем кончилось бы дело.
+3 — выдать не удалось (backlog пуст, backlog исчерпан или нет свободных
+исполнителей). --dry-run возвращает те же коды, что и обычный запуск: по нему
+видно, чем кончилось бы дело.
 EOF
 }
 
@@ -177,29 +191,114 @@ read_workers() {
   fi
 }
 
-# Занят ли исполнитель: у него есть карточка в работе.
-worker_busy() {
-  local who="$1" file
+# Идентификатор карточки: поле `id`, иначе имя файла.
+card_id() {
+  local id
+  id="$(card_field "$1" id)"
+  printf '%s' "${id:-$(basename "$1" .md)}"
+}
+
+# Карточка с front matter: файл начинается с `---`. Битые файлы (в дереве может
+# лежать что угодно) в снимок не попадают — как и у сторожа, где такая карточка
+# не разбирается и на доску не едет.
+card_ok() {
+  local first=""
+  IFS= read -r first < "$1" || true
+  [[ "${first%$'\r'}" == "---" ]]
+}
+
+# Карточки со всех досок проекта: `<из дерева 0|1>\t<путь>\t<id>\t<updated>`.
+# Из дерева берётся только одноимённая карточка `<name>.md`: дерево ветвится от
+# основной ветки и наследует чужие карточки, а они не его задачи (то же правило,
+# что у сторожа и в клиентской половине плагина). Битый или пустой каталог
+# дерева просто не даёт строк.
+board_card_files() {
+  local file trees dir name
   for file in "$TASKS_DIR"/[0-9]*.md; do
     [[ -e "$file" ]] || continue
+    card_ok "$file" || continue
+    printf '0\t%s\t%s\t%s\n' "$file" "$(card_id "$file")" "$(card_field "$file" updated)"
+  done
+  for trees in worktrees .worktrees; do
+    [[ -d "$ROOT/$trees" ]] || continue
+    for dir in "$ROOT/$trees"/*/.kanban/tasks; do
+      [[ -d "$dir" ]] || continue
+      name="${dir%/.kanban/tasks}"
+      name="${name##*/}"
+      file="$dir/$name.md"
+      [[ -f "$file" ]] || continue
+      card_ok "$file" || continue
+      printf '1\t%s\t%s\t%s\n' "$file" "$(card_id "$file")" "$(card_field "$file" updated)"
+    done
+  done
+}
+
+# Снимок доски так, как его видит выдача: одна живая копия на карточку.
+# Свежесть — `updated` (ISO-строки сравниваются лексикографически), при равенстве
+# выигрывает копия из рабочего дерева: она живая, а копия в основном чекауте
+# могла остаться от прошлого слияния. Правило то же, что у сторожа (`isNewer`).
+build_snapshot() {
+  SNAPSHOT_FILE="$(mktemp "${TMPDIR:-/tmp}/kanban-snapshot.XXXXXX")"
+  board_card_files | awk -F '\t' '
+    function newer(cand, candTree, cur, curTree) {
+      if (cand != "" && cur != "") {
+        if (cand == cur) return (candTree + 0)
+        return (cand > cur)
+      }
+      if (cand != "") return 1
+      if (cur != "") return 0
+      return (candTree + 0)
+    }
+    {
+      id = $3
+      if (!(id in seen)) {
+        seen[id] = 1
+        order[++total] = id
+        bestPath[id] = $2
+        bestUpdated[id] = $4
+        bestTree[id] = $1
+        next
+      }
+      if (newer($4, $1, bestUpdated[id], bestTree[id])) {
+        bestPath[id] = $2
+        bestUpdated[id] = $4
+        bestTree[id] = $1
+      }
+    }
+    END { for (i = 1; i <= total; i++) printf "%s\t%s\n", order[i], bestPath[order[i]] }
+  ' > "$SNAPSHOT_FILE"
+}
+
+cleanup() {
+  [[ -n "$SNAPSHOT_FILE" ]] && rm -f "$SNAPSHOT_FILE"
+}
+
+# Занят ли исполнитель: у него есть карточка в работе на любой доске проекта.
+worker_busy() {
+  local who="$1" id file
+  while IFS=$'\t' read -r id file; do
     [[ "$(card_status "$file")" == "in-progress" ]] || continue
     [[ "$(card_field "$file" owner)" == "$who" ]] && return 0
-  done
+  done < "$SNAPSHOT_FILE"
   return 1
 }
 
+# Сколько карточек в статусе — по снимку доски (все доски, одна копия на карточку).
 count_status() {
-  local want="$1" file count=0
-  for file in "$TASKS_DIR"/[0-9]*.md; do
-    [[ -e "$file" ]] || continue
+  local want="$1" id file count=0
+  while IFS=$'\t' read -r id file; do
     [[ "$(card_status "$file")" == "$want" ]] && count=$((count + 1))
-  done
+  done < "$SNAPSHOT_FILE"
   printf '%s' "$count"
 }
 
 if [[ ! -d "$TASKS_DIR" ]]; then
   die_config "нет каталога карточек: $TASKS_DIR"
 fi
+
+SNAPSHOT_FILE=""
+trap cleanup EXIT
+build_snapshot
 
 MIN="$(read_min_todo "$MIN_OVERRIDE")"
 read_workers
@@ -256,8 +355,14 @@ for file in "$TASKS_DIR"/[0-9]*.md; do
   assigned=$((assigned + 1))
 done
 
-if (( assigned == 0 )) && [[ -z "$why" ]]; then
-  why="backlog пуст"
+# Честный итог: если выдали меньше, чем не хватало, то из-за исчерпанного
+# backlog — важно, сколько именно выдали и сколько осталось недобрать.
+if [[ -z "$why" ]] && (( assigned < need )); then
+  if (( assigned == 0 )); then
+    why="backlog пуст"
+  else
+    why="backlog исчерпан: выдано $assigned из $need, недобор $((need - assigned))"
+  fi
 fi
 
 final_todo=$((todo_now + assigned))

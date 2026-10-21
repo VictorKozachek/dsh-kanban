@@ -408,6 +408,94 @@ else
   fail "fallback пула: $(cat "$WORK/fill8" 2>/dev/null)"
 fi
 
+echo "== backlog-fill: занятость исполнителя в рабочих деревьях"
+# Карточка для стенда: критерий занятости — статус и owner, остальное не важно.
+write_card() { # файл id статус владелец [updated]
+  printf -- '---\nid: "%s"\ntitle: Задача %s\nstatus: %s\nowner: "%s"\nupdated: "%s"\n---\n' \
+    "$2" "$2" "$3" "$4" "${5:-2026-10-21T10:00:00Z}" > "$1"
+}
+
+# Кто записан во владельцах карточки: task-move пишет простое значение без кавычек.
+written_owner() {
+  awk 'NR > 1 && $0 == "---" { exit }
+       /^owner:/ { sub(/^owner:[ \t]*/, ""); gsub(/"/, ""); sub(/[ \t]+$/, ""); print; exit }' "$1"
+}
+
+# Исполнитель держит задачу в работе внутри рабочего дерева (так выглядит задача,
+# заведённая штатным task-new.sh) — он занят, задача уходит следующему.
+tree_repo="$WORK/fill-tree"
+make_repo "$tree_repo"
+( cd "$tree_repo" && ./bin/task-new.sh "Ждёт выдачи" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$tree_repo/.kanban" "$tree_repo/worktrees/077/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$tree_repo/.kanban/board.json"
+printf '["sess-a","sess-b"]\n' > "$tree_repo/.kanban/.workers.json"
+write_card "$tree_repo/worktrees/077/.kanban/tasks/077.md" 077 in-progress sess-a
+fill_code=0
+( cd "$tree_repo" && ./bin/backlog-fill.sh >"$WORK/fill12" 2>&1 ) || fill_code=$?
+tree_owner="$(written_owner "$tree_repo/.kanban/tasks/001.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$tree_owner" == "sess-b" ]]; then
+  pass "исполнитель с работой в дереве занят: задача ушла следующему свободному"
+else
+  fail "занятость в дереве: код $fill_code, owner '$tree_owner', $(cat "$WORK/fill12" 2>/dev/null)"
+fi
+
+# Унаследованная копия чужой карточки в дереве занятости не создаёт: из дерева
+# берётся только одноимённая карточка.
+inherit_repo="$WORK/fill-inherit"
+make_repo "$inherit_repo"
+( cd "$inherit_repo" && ./bin/task-new.sh "Ждёт выдачи" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$inherit_repo/.kanban" "$inherit_repo/worktrees/077/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$inherit_repo/.kanban/board.json"
+printf '["sess-a"]\n' > "$inherit_repo/.kanban/.workers.json"
+write_card "$inherit_repo/worktrees/077/.kanban/tasks/001.md" 001 in-progress sess-a
+fill_code=0
+( cd "$inherit_repo" && ./bin/backlog-fill.sh >"$WORK/fill13" 2>&1 ) || fill_code=$?
+inherit_owner="$(written_owner "$inherit_repo/.kanban/tasks/001.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$inherit_owner" == "sess-a" ]]; then
+  pass "унаследованная копия чужой карточки в дереве занятости не создаёт"
+else
+  fail "унаследованная копия: код $fill_code, owner '$inherit_owner', $(cat "$WORK/fill13" 2>/dev/null)"
+fi
+
+# Битый и пустой каталог дерева не ломает подсчёт: карточка без front matter не
+# считается карточкой, каталог без `.kanban/tasks` и файл в `worktrees/` — тоже.
+broken_repo="$WORK/fill-broken"
+make_repo "$broken_repo"
+( cd "$broken_repo" && ./bin/task-new.sh "Ждёт выдачи" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$broken_repo/.kanban" "$broken_repo/worktrees/без-доски" \
+  "$broken_repo/worktrees/078/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$broken_repo/.kanban/board.json"
+printf '["sess-a"]\n' > "$broken_repo/.kanban/.workers.json"
+printf 'без front matter\n' > "$broken_repo/worktrees/078/.kanban/tasks/078.md"
+printf 'не дерево\n' > "$broken_repo/worktrees/мусор"
+fill_code=0
+( cd "$broken_repo" && ./bin/backlog-fill.sh >"$WORK/fill14" 2>&1 ) || fill_code=$?
+broken_owner="$(written_owner "$broken_repo/.kanban/tasks/001.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$broken_owner" == "sess-a" ]] &&
+   grep -q 'выдано: #001' "$WORK/fill14"; then
+  pass "битый и пустой каталог дерева не ломает подсчёт"
+else
+  fail "битые деревья: код $fill_code, owner '$broken_owner', $(cat "$WORK/fill14" 2>/dev/null)"
+fi
+
+# Частичный backlog: недобор 2, в очереди одна карточка — выдана одна, код 3 и
+# честный итог с недобором.
+partial_repo="$WORK/fill-partial"
+make_repo "$partial_repo"
+( cd "$partial_repo" && ./bin/task-new.sh "Единственная" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$partial_repo/.kanban"
+printf '{"minTodo": 2}\n' > "$partial_repo/.kanban/board.json"
+printf '["sess-a","sess-b"]\n' > "$partial_repo/.kanban/.workers.json"
+fill_code=0
+( cd "$partial_repo" && ./bin/backlog-fill.sh >"$WORK/fill15" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "3" ]] && grep -q "выдано 1 из 2" "$WORK/fill15" &&
+   grep -q "backlog исчерпан" "$WORK/fill15" &&
+   grep -q '^status: todo' "$partial_repo/.kanban/tasks/001.md"; then
+  pass "частичный backlog: выдано 1 из 2, код 3 и «backlog исчерпан»"
+else
+  fail "частичный backlog: код $fill_code, $(cat "$WORK/fill15" 2>/dev/null)"
+fi
+
 echo "== .gitignore закрывает служебные файлы доски"
 for path in .kanban/.watcher-state.json .kanban/.watcher-roles.json .kanban/.watcher-pending.json .kanban/.workers.json .kanban/worktrees.json worktrees/007; do
   if git -C "$ROOT" check-ignore -q "$path"; then
