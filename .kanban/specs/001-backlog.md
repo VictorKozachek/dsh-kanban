@@ -31,7 +31,8 @@
 
 ## Минимум todo и выдача
 
-- Минимум задач в `todo` — `.kanban/board.json` (tracked): `{ "minTodo": 2 }`.
+- Минимум задач в `todo` — `.kanban/board.json` (tracked): `{ "minTodo": 3 }`
+  (два исполнителя + буфер в очереди; значение меняется без правки кода).
 - Пул исполнителей — `.kanban/.workers.json` (в `.gitignore`): упорядоченный
   список id сессий; fallback — единственный `worker` из `.kanban/.watcher-roles.json`.
 - «Свободен» = у исполнителя нет карточки в `in-progress` (правило «один
