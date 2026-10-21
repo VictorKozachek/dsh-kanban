@@ -23,6 +23,13 @@
  * на состояние: файл состояния хранит ключ `board:refill:short`, пока `todo` не
  * доберёт до минимума.
  *
+ * Доска собирается из нескольких источников: `.kanban/tasks` основного чекаута и
+ * доски рабочих деревьев (`worktrees/*`, `.worktrees/*`) — открытая задача живёт
+ * в своём дереве, и без обхода деревьев её переходы невидимы. Записи сливаются по
+ * `id`: побеждает более свежий `updated`, при равенстве — копия из дерева (та же
+ * семантика, что в клиентской половине). Если карточка живёт в дереве, текст
+ * наряда указывает этот каталог: работать надо там.
+ *
  * Конфиг (в строке плагина, `config`):
  *   boards: ["/путь/к/проекту"]      — где искать `.kanban/tasks`
  *   roles: { reviewer, verifier, dispatcher } — id сессий ролей
@@ -35,7 +42,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { deliveryKey, planNotices, snapshotCards } from "./watcher-core.js";
+import { deliveryKey, isNewer, planNotices, snapshotCards } from "./watcher-core.js";
 import {
   DEFAULT_MIN_TODO,
   REFILL_KEY,
@@ -64,11 +71,84 @@ function log(ctx, level, message) {
   }
 }
 
-/** Прочитать снимок доски; `null` — каталога нет или он недоступен. */
-function readSnapshot(tasksDir) {
+/**
+ * Каталоги рабочих деревьев задач внутри проекта: оба имени встречаются в
+ * проекте (`worktrees` — основной, `.worktrees` — прежние раскладки).
+ */
+const WORKTREES_DIRS = ["worktrees", ".worktrees"];
+
+/** Каталог карточек основного чекаута — единственный обязательный источник. */
+function mainTasksDir(root) {
+  return path.join(root, ".kanban", "tasks");
+}
+
+/**
+ * Источники снимка доски: основной чекаут и доски рабочих деревьев.
+ *
+ * Открытая задача живёт в своём дереве (`worktrees/<id>`, где своя копия
+ * `.kanban/tasks` из ветки задачи), поэтому без обхода деревьев её переходы для
+ * сторожа невидимы. Манифест `.kanban/worktrees.json` (деревья за пределами
+ * проекта) здесь не читается — это отдельная задача.
+ *
+ * @param root - корень проекта из `config.boards`.
+ * @returns Список `{ dir, worktree }`; `worktree` — путь дерева относительно
+ *   корня проекта, `null` — основная доска.
+ */
+function boardSources(root) {
+  const sources = [{ dir: mainTasksDir(root), worktree: null }];
+  for (const trees of WORKTREES_DIRS) {
+    let names;
+    try {
+      names = fs.readdirSync(path.join(root, trees));
+    } catch {
+      continue; // деревьев этого вида нет — обычное дело
+    }
+    for (const name of names) {
+      const dir = path.join(root, trees, name, ".kanban", "tasks");
+      try {
+        if (!fs.statSync(dir).isDirectory()) continue;
+      } catch {
+        continue; // не дерево (файл, мусор) или исчезло между обходом и проверкой
+      }
+      sources.push({ dir, worktree: `${trees}/${name}` });
+    }
+  }
+  return sources;
+}
+
+/**
+ * Каталоги, события в которых могут изменить снимок: сама доска, доски деревьев
+ * и родительские `worktrees/` — по ним видно появление и удаление дерева.
+ *
+ * Если каталога деревьев ещё нет, следим за корнем проекта: так замечается его
+ * создание, иначе первое дерево появилось бы без единого события и сторож узнал
+ * бы о нём только при следующем переходе в основной доске. Событий от корня
+ * немного (только создание и удаление записей в нём), а обход по ним дешёвый и
+ * дедуплицированный.
+ */
+function watchDirs(root) {
+  const dirs = new Set([mainTasksDir(root)]);
+  for (const source of boardSources(root)) dirs.add(source.dir);
+  for (const trees of WORKTREES_DIRS) {
+    const parent = path.join(root, trees);
+    try {
+      if (fs.statSync(parent).isDirectory()) {
+        dirs.add(parent);
+        continue;
+      }
+    } catch {
+      /* деревьев этого вида пока нет */
+    }
+    dirs.add(root);
+  }
+  return dirs;
+}
+
+/** Прочитать карточки одного каталога; `null` — каталог недоступен. */
+function readCards(dir) {
   let names;
   try {
-    names = fs.readdirSync(tasksDir);
+    names = fs.readdirSync(dir);
   } catch {
     return null;
   }
@@ -76,12 +156,84 @@ function readSnapshot(tasksDir) {
   for (const name of names) {
     if (!name.endsWith(".md")) continue;
     try {
-      entries.push([name, fs.readFileSync(path.join(tasksDir, name), "utf8")]);
+      entries.push([name, fs.readFileSync(path.join(dir, name), "utf8")]);
     } catch {
       /* файл исчез между чтением каталога и файла — не беда */
     }
   }
-  return snapshotCards(entries);
+  return entries;
+}
+
+/**
+ * Поле `worktree` из front matter карточки.
+ *
+ * Ядро (`watcher-core.js`, `FIELDS`) его не читает: там карточка нужна только для
+ * решения «кого будить». Тексту наряда оно нужно — карточка открытой задачи живёт
+ * в рабочем дереве, и исполнителю надо знать, откуда работать.
+ */
+function worktreeField(text) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return "";
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "---") break;
+    const match = /^worktree:[ \t]*(.*)$/.exec(line);
+    if (!match) continue;
+    let value = match[1].trim();
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      value = value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+    return value;
+  }
+  return "";
+}
+
+/**
+ * Путь рабочего дерева для текста наряда: относительный, если дерево внутри
+ * проекта (так наряд читаемее), иначе как записан в карточке.
+ */
+function displayWorktree(root, value) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return "";
+  const relative = path.relative(root, path.resolve(root, raw));
+  if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+    return relative.split(path.sep).join("/");
+  }
+  return raw;
+}
+
+/**
+ * Снять слитый снимок доски; `null` — каталога карточек основного чекаута нет.
+ *
+ * Слияние по id карточки: побеждает более свежий `updated`, при равенстве —
+ * копия из рабочего дерева. Та же семантика, что в клиентской половине
+ * (`lib/client.js`). Нечитаемый каталог, пропавший файл, удалённое дерево —
+ * пропускаем: доска обязана пережить уборку дерева.
+ *
+ * @param root - корень проекта.
+ * @returns Снимок `id → карточка` с полями `source` и `worktree`.
+ */
+function readSnapshot(root) {
+  const merged = new Map();
+  let found = false;
+  for (const source of boardSources(root)) {
+    const entries = readCards(source.dir);
+    if (entries === null) continue;
+    // Без основного каталога доски нет — сторож по ней не запускается. Рабочее
+    // дерево, наоборот, могло исчезнуть: это норма, а не повод молчать.
+    if (source.worktree === null) found = true;
+    const fields = new Map();
+    for (const [name, text] of entries) {
+      fields.set(name.replace(/\.md$/, ""), worktreeField(text));
+    }
+    for (const [id, card] of snapshotCards(entries)) {
+      card.source = source.worktree ? "worktree" : "main";
+      card.worktree = source.worktree ?? displayWorktree(root, fields.get(id) ?? "");
+      const current = merged.get(card.id);
+      if (!current || isNewer(card, current)) merged.set(card.id, card);
+    }
+  }
+  return found ? merged : null;
 }
 
 function loadState(file) {
@@ -116,6 +268,20 @@ function readMinTodo(file) {
   }
 }
 
+/**
+ * Текст наряда: если карточка живёт в рабочем дереве, к нему дописывается путь
+ * дерева — исполнитель и ревьювер должны работать там, а не в основном чекауте
+ * (в основном чекауте копия карточки старая, а файлы задачи — в дереве).
+ *
+ * Решение о том, кого будить, остаётся в ядре (`watcher-core.js`): здесь только
+ * текст.
+ */
+function noticeText(item) {
+  const dir = String(item?.worktree ?? "");
+  if (dir === "") return item.text;
+  return `${item.text}\n\nКарточка в ${dir} — работай там: команды выполняй из этого каталога.`;
+}
+
 /** Отправить один наряд в сессию; `true` — принят. */
 async function deliver(ctx, item) {
   const service = ctx.sessionController;
@@ -129,7 +295,7 @@ async function deliver(ctx, item) {
         requestId: randomUUID(),
         sessionId: item.sessionId,
         mode: "queue",
-        content: [{ type: "text", text: item.text }],
+        content: [{ type: "text", text: noticeText(item) }],
       },
       new AbortController().signal,
     );
@@ -182,13 +348,14 @@ export function apply(ctx, config = {}) {
     const reannounce = [];
 
     for (const board of boards) {
-      const tasksDir = path.join(String(board), ".kanban", "tasks");
-      const stateFile = path.join(String(board), ".kanban", ".watcher-state.json");
+      const root = String(board);
+      const tasksDir = mainTasksDir(root);
+      const stateFile = path.join(root, ".kanban", ".watcher-state.json");
       // Минимум карточек в `todo` (`.kanban/board.json`): по нему решается, пора ли
       // будить оркестратора. Читаем на каждый обход — конфиг может поправить сам
       // оркестратор, а файл дешёвый.
-      const boardFile = path.join(String(board), ".kanban", "board.json");
-      let previous = readSnapshot(tasksDir);
+      const boardFile = path.join(root, ".kanban", "board.json");
+      let previous = readSnapshot(root);
       if (previous === null) {
         log(ctx, "warn", `нет каталога карточек: ${tasksDir}`);
         continue;
@@ -225,6 +392,8 @@ export function apply(ctx, config = {}) {
               status: item.status,
               sessionId: item.sessionId,
               text: item.text,
+              // Рабочее дерево — часть текста наряда, поэтому едет вместе с ним.
+              worktree: item.worktree ?? "",
               at: new Date().toISOString(),
             };
             saveState(pendingFile, pending);
@@ -292,7 +461,11 @@ export function apply(ctx, config = {}) {
         for (const item of notices) {
           // У асайна свой ключ: он учитывает владельца, иначе перепривязка в `todo`
           // осталась бы без наряда.
-          deliverOnce(item.key ?? deliveryKey(next.get(item.cardId), item.status), item);
+          const key = item.key ?? deliveryKey(next.get(item.cardId), item.status);
+          // Рабочее дерево карточки едет в тексте наряда: открытая задача живёт там,
+          // и роли надо работать из этого каталога, а не из основного чекаута.
+          const worktree = next.get(item.cardId)?.worktree ?? "";
+          deliverOnce(key, worktree ? { ...item, worktree } : item);
         }
         announceRefill(next);
       };
@@ -329,28 +502,51 @@ export function apply(ctx, config = {}) {
       // в файле состояния по ключу id:status:updated.
       reannounce.push(() => announce(new Map(), previous));
 
-      // 2. Переходы: следим за каталогом и разбираем изменения.
+      // 2. Переходы: следим за каталогами карточек и разбираем изменения.
+      //    Кроме основной доски — доски рабочих деревьев и сами `worktrees/`:
+      //    по ним видно появление и уборку дерева. Набор каталогов меняется,
+      //    поэтому наблюдения сверяем на каждом тике.
       let timer = null;
+      const watched = new Map();
       const tick = () => {
         timer = null;
-        const next = readSnapshot(tasksDir);
+        const next = readSnapshot(root);
         if (next === null) return;
         const before = previous;
         previous = next;
         announce(before, next);
+        syncWatch();
       };
-
-      try {
-        const watcher = fs.watch(tasksDir, () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(tick, debounceMs);
-          // Таймер паузы тоже отслеживаем: иначе после dispose он выстрелит ещё раз.
-          timers.push(timer);
-        });
-        watchers.push(watcher);
-      } catch (error) {
-        log(ctx, "warn", `не слежу за ${tasksDir}: ${error?.message ?? error}`);
-      }
+      const onEvent = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(tick, debounceMs);
+        // Таймер паузы тоже отслеживаем: иначе после dispose он выстрелит ещё раз.
+        timers.push(timer);
+      };
+      const syncWatch = () => {
+        const dirs = watchDirs(root);
+        for (const [dir, watcher] of watched) {
+          if (dirs.has(dir)) continue;
+          // Дерево убрали — наблюдение за ним закрываем, иначе оно держит дескриптор.
+          try {
+            watcher.close();
+          } catch {
+            /* уже закрыт */
+          }
+          watched.delete(dir);
+        }
+        for (const dir of dirs) {
+          if (watched.has(dir)) continue;
+          try {
+            const watcher = fs.watch(dir, onEvent);
+            watched.set(dir, watcher);
+            watchers.push(watcher);
+          } catch (error) {
+            log(ctx, "warn", `не слежу за ${dir}: ${error?.message ?? error}`);
+          }
+        }
+      };
+      syncWatch();
     }
 
     // Роль сессии узнаём сами: DSH объявляет выбор пресета глобальным событием
