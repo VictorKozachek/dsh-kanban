@@ -496,6 +496,115 @@ else
   fail "частичный backlog: код $fill_code, $(cat "$WORK/fill15" 2>/dev/null)"
 fi
 
+echo "== backlog-fill: выдача из backlog, когда задача живёт в ветке"
+# Карточка-кандидат в ветке задачи: рабочее дерево настоящее, со своей копией
+# bin/task-move.sh (иначе выдача из дерева некуда идти).
+branch_repo="$WORK/fill-branch"
+make_repo "$branch_repo"
+mkdir -p "$branch_repo/.kanban/tasks"
+printf '{"minTodo": 2}\n' > "$branch_repo/.kanban/board.json"
+printf '["sess-a","sess-b"]\n' > "$branch_repo/.kanban/.workers.json"
+git -C "$branch_repo" worktree add -q -b task/010 "$branch_repo/worktrees/010" HEAD
+mkdir -p "$branch_repo/worktrees/010/.kanban/tasks"
+write_card "$branch_repo/worktrees/010/.kanban/tasks/010.md" 010 backlog ""
+fill_code=0
+( cd "$branch_repo" && ./bin/backlog-fill.sh >"$WORK/fill16" 2>&1 ) || fill_code=$?
+branch_status="$(sed -n 's/^status: *//p' "$branch_repo/worktrees/010/.kanban/tasks/010.md" | head -1)"
+branch_owner="$(written_owner "$branch_repo/worktrees/010/.kanban/tasks/010.md")"
+if [[ "$fill_code" == "3" ]] && [[ "$branch_status" == "todo" ]] && [[ "$branch_owner" == "sess-a" ]] &&
+   grep -q "выдано: #010" "$WORK/fill16" && [[ ! -e "$branch_repo/.kanban/tasks/010.md" ]]; then
+  pass "карточка только в ветке задачи выдаётся свободному исполнителю"
+else
+  fail "выдача из ветки: код $fill_code, status '$branch_status', owner '$branch_owner', $(cat "$WORK/fill16" 2>/dev/null)"
+fi
+# Статус уехал в ветку задачи, а не в основной чекаут.
+if git -C "$branch_repo/worktrees/010" log --oneline -1 | grep -q "kanban(010): todo"; then
+  pass "выдача из ветки коммитится в ветку задачи"
+else
+  fail "коммит выдачи из ветки: $(git -C "$branch_repo/worktrees/010" log --oneline -1 2>&1)"
+fi
+
+# Устаревшая копия в main не выдаёт занятую карточку: слитый снимок видит
+# in-progress из дерева, а следующий кандидат уходит второму исполнителю.
+stale_repo="$WORK/fill-stale"
+make_repo "$stale_repo"
+mkdir -p "$stale_repo/.kanban/tasks" "$stale_repo/worktrees/010/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$stale_repo/.kanban/board.json"
+printf '["sess-a","sess-b"]\n' > "$stale_repo/.kanban/.workers.json"
+write_card "$stale_repo/.kanban/tasks/010.md" 010 backlog "" "2026-10-21T10:00:00Z"
+write_card "$stale_repo/.kanban/tasks/011.md" 011 backlog "" "2026-10-21T10:00:00Z"
+write_card "$stale_repo/worktrees/010/.kanban/tasks/010.md" 010 in-progress sess-a "2026-10-21T11:00:00Z"
+fill_code=0
+( cd "$stale_repo" && ./bin/backlog-fill.sh >"$WORK/fill17" 2>&1 ) || fill_code=$?
+stale_010_status="$(sed -n 's/^status: *//p' "$stale_repo/.kanban/tasks/010.md" | head -1)"
+stale_011_owner="$(written_owner "$stale_repo/.kanban/tasks/011.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$stale_010_status" == "backlog" ]] &&
+   [[ "$stale_011_owner" == "sess-b" ]] && grep -q "выдано: #011 → sess-b" "$WORK/fill17"; then
+  pass "устаревшая копия в main не выдаёт занятую карточку: занятость видна из дерева"
+else
+  fail "устаревший main: код $fill_code, 010 '$stale_010_status', 011 owner '$stale_011_owner', $(cat "$WORK/fill17" 2>/dev/null)"
+fi
+
+# Порченый файл дерева с чужим id не подменяет чужую карточку.
+bogus_repo="$WORK/fill-bogus"
+make_repo "$bogus_repo"
+mkdir -p "$bogus_repo/.kanban/tasks" "$bogus_repo/worktrees/077/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$bogus_repo/.kanban/board.json"
+printf '["sess-a"]\n' > "$bogus_repo/.kanban/.workers.json"
+write_card "$bogus_repo/.kanban/tasks/001.md" 001 backlog ""
+write_card "$bogus_repo/worktrees/077/.kanban/tasks/077.md" 001 in-progress sess-a
+fill_code=0
+( cd "$bogus_repo" && ./bin/backlog-fill.sh >"$WORK/fill18" 2>&1 ) || fill_code=$?
+bogus_owner="$(written_owner "$bogus_repo/.kanban/tasks/001.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$bogus_owner" == "sess-a" ]] &&
+   grep -q '^status: in-progress' "$bogus_repo/worktrees/077/.kanban/tasks/077.md"; then
+  pass "порченый файл дерева с чужим id не подменяет карточку"
+else
+  fail "порченый файл дерева: код $fill_code, owner '$bogus_owner', $(cat "$WORK/fill18" 2>/dev/null)"
+fi
+
+# Свежая копия в дереве побеждает main: в main in-progress, в дереве backlog.
+fresh_repo="$WORK/fill-fresh"
+make_repo "$fresh_repo"
+mkdir -p "$fresh_repo/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$fresh_repo/.kanban/board.json"
+printf '["sess-a"]\n' > "$fresh_repo/.kanban/.workers.json"
+write_card "$fresh_repo/.kanban/tasks/010.md" 010 in-progress sess-a "2026-10-21T10:00:00Z"
+git -C "$fresh_repo" worktree add -q -b task/010 "$fresh_repo/worktrees/010" HEAD
+mkdir -p "$fresh_repo/worktrees/010/.kanban/tasks"
+write_card "$fresh_repo/worktrees/010/.kanban/tasks/010.md" 010 backlog "" "2026-10-21T11:00:00Z"
+fill_code=0
+( cd "$fresh_repo" && ./bin/backlog-fill.sh >"$WORK/fill19" 2>&1 ) || fill_code=$?
+fresh_status="$(sed -n 's/^status: *//p' "$fresh_repo/worktrees/010/.kanban/tasks/010.md" | head -1)"
+fresh_owner="$(written_owner "$fresh_repo/worktrees/010/.kanban/tasks/010.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$fresh_status" == "todo" ]] && [[ "$fresh_owner" == "sess-a" ]] &&
+   grep -q "выдано: #010" "$WORK/fill19"; then
+  pass "свежая копия в дереве побеждает устаревшую в main"
+else
+  fail "свежая копия в дереве: код $fill_code, status '$fresh_status', owner '$fresh_owner', $(cat "$WORK/fill19" 2>/dev/null)"
+fi
+
+# Равенство updated — в пользу дерева: main in-progress, дерево backlog.
+equal_repo="$WORK/fill-equal"
+make_repo "$equal_repo"
+mkdir -p "$equal_repo/.kanban/tasks"
+printf '{"minTodo": 1}\n' > "$equal_repo/.kanban/board.json"
+printf '["sess-a"]\n' > "$equal_repo/.kanban/.workers.json"
+write_card "$equal_repo/.kanban/tasks/010.md" 010 in-progress sess-a "2026-10-21T10:00:00Z"
+git -C "$equal_repo" worktree add -q -b task/010 "$equal_repo/worktrees/010" HEAD
+mkdir -p "$equal_repo/worktrees/010/.kanban/tasks"
+write_card "$equal_repo/worktrees/010/.kanban/tasks/010.md" 010 backlog "" "2026-10-21T10:00:00Z"
+fill_code=0
+( cd "$equal_repo" && ./bin/backlog-fill.sh >"$WORK/fill20" 2>&1 ) || fill_code=$?
+equal_status="$(sed -n 's/^status: *//p' "$equal_repo/worktrees/010/.kanban/tasks/010.md" | head -1)"
+equal_owner="$(written_owner "$equal_repo/worktrees/010/.kanban/tasks/010.md")"
+if [[ "$fill_code" == "0" ]] && [[ "$equal_status" == "todo" ]] && [[ "$equal_owner" == "sess-a" ]] &&
+   grep -q "выдано: #010" "$WORK/fill20"; then
+  pass "при равном updated выигрывает копия из дерева"
+else
+  fail "равенство updated: код $fill_code, status '$equal_status', owner '$equal_owner', $(cat "$WORK/fill20" 2>/dev/null)"
+fi
+
 echo "== .gitignore закрывает служебные файлы доски"
 for path in .kanban/.watcher-state.json .kanban/.watcher-roles.json .kanban/.watcher-pending.json .kanban/.workers.json .kanban/worktrees.json worktrees/007; do
   if git -C "$ROOT" check-ignore -q "$path"; then

@@ -25,9 +25,11 @@
 # (`dsh-kanban/lib/index.js`). Иначе исполнитель, у которого задача в работе
 # внутри дерева, выглядел бы свободным и получил бы вторую.
 #
-# Карточки к выдаче берутся из `backlog` основного чекаута по возрастанию id
-# (FIFO) и выдаются переходом `backlog → todo --owner <id>` через
-# `bin/task-move.sh`: правила протокола остаются в одном месте.
+# Карточки к выдаче берутся из `backlog` слитого снимка по возрастанию id (FIFO)
+# и выдаются переходом `backlog → todo --owner <id>` через `bin/task-move.sh`:
+# правила протокола остаются в одном месте. Если карточка живёт в рабочем дереве,
+# команду выполняет копия скрипта из этого дерева — иначе `task-move.sh` основного
+# чекаута карточку не найдёт.
 #
 # Коды возврата: 0 — ок (в том числе «пополнять нечего»); 1 — ошибка конфига или
 # доски; 3 — выдать не удалось: backlog пуст, backlog исчерпан (выдали меньше,
@@ -51,9 +53,11 @@ usage() {
 .kanban/board.json, по умолчанию 1), закрепляя их за свободными исполнителями из
 .kanban/.workers.json (fallback — worker из .kanban/.watcher-roles.json).
 
-Занятость считается по всем доскам проекта: основной чекаут и рабочие деревья
-(из дерева берётся только одноимённая карточка). Если backlog кончился раньше,
-чем набрался минимум, выдача честно пишет, сколько выдано и сколько недобрали.
+Занятость и кандидаты считаются по всем доскам проекта: основной чекаут и
+рабочие деревья (из дерева берётся только одноимённая карточка). Карточка,
+живущая в ветке задачи, выдаётся оттуда же — своей копией bin/task-move.sh.
+Если backlog кончился раньше, чем набрался минимум, выдача честно пишет, сколько
+выдано и сколько недобрали.
 
   --dry-run   показать план и ничего не менять
   --min N     минимум на этот запуск
@@ -228,9 +232,27 @@ board_card_files() {
       file="$dir/$name.md"
       [[ -f "$file" ]] || continue
       card_ok "$file" || continue
+      # Живая карточка дерева — ровно та, что названа каталогом: файл с чужим `id`
+      # внутри (порченая копия) не должен подменить чужую карточку — то же
+      # правило, что `liveId` у сторожа (`dsh-kanban/lib/index.js`).
+      [[ "$(card_id "$file")" == "$name" ]] || continue
       printf '1\t%s\t%s\t%s\n' "$file" "$(card_id "$file")" "$(card_field "$file" updated)"
     done
   done
+}
+
+# Чем двигать карточку: карточка рабочего дерева живёт в его ветке, и скрипт
+# основного чекаута её не найдёт (`task-move.sh` смотрит в свой `.kanban/tasks`).
+# У дерева своя копия скрипта — ею и выдаём.
+mover_for() {
+  local file="$1" from_tree="$2" tasks_dir tree_root
+  if [[ "$from_tree" == "1" ]]; then
+    tasks_dir="$(dirname "$file")"
+    tree_root="$(dirname "$(dirname "$tasks_dir")")"
+    printf '%s' "$tree_root/bin/task-move.sh"
+    return 0
+  fi
+  printf '%s' "$ROOT/bin/task-move.sh"
 }
 
 # Снимок доски так, как его видит выдача: одна живая копия на карточку.
@@ -265,8 +287,10 @@ build_snapshot() {
         bestTree[id] = $1
       }
     }
-    END { for (i = 1; i <= total; i++) printf "%s\t%s\n", order[i], bestPath[order[i]] }
-  ' > "$SNAPSHOT_FILE"
+    END {
+      for (i = 1; i <= total; i++) printf "%s\t%s\t%s\n", order[i], bestPath[order[i]], bestTree[order[i]]
+    }
+  ' | LC_ALL=C sort > "$SNAPSHOT_FILE"
 }
 
 cleanup() {
@@ -275,8 +299,8 @@ cleanup() {
 
 # Занят ли исполнитель: у него есть карточка в работе на любой доске проекта.
 worker_busy() {
-  local who="$1" id file
-  while IFS=$'\t' read -r id file; do
+  local who="$1" id file from_tree
+  while IFS=$'\t' read -r id file from_tree; do
     [[ "$(card_status "$file")" == "in-progress" ]] || continue
     [[ "$(card_field "$file" owner)" == "$who" ]] && return 0
   done < "$SNAPSHOT_FILE"
@@ -285,8 +309,8 @@ worker_busy() {
 
 # Сколько карточек в статусе — по снимку доски (все доски, одна копия на карточку).
 count_status() {
-  local want="$1" id file count=0
-  while IFS=$'\t' read -r id file; do
+  local want="$1" id file from_tree count=0
+  while IFS=$'\t' read -r id file from_tree; do
     [[ "$(card_status "$file")" == "$want" ]] && count=$((count + 1))
   done < "$SNAPSHOT_FILE"
   printf '%s' "$count"
@@ -316,15 +340,16 @@ taken=" "
 ids=""
 owners=""
 
-# Один проход по backlog в порядке возрастания id (FIFO): глоб сортирует имена
-# файлов, а они у задач — `%03d.md`.
-for file in "$TASKS_DIR"/[0-9]*.md; do
-  [[ -e "$file" ]] || continue
+# Один проход по слитому снимку в порядке возрастания id (FIFO): карточка-кандидат
+# может жить в ветке задачи, поэтому смотрим не только основной чекаут. Снимок
+# показывает живую копию: если main хранит устаревший `backlog`, а в дереве та же
+# карточка уже `in-progress`, второй исполнитель её не получит.
+issued=" "
+while IFS=$'\t' read -r id file from_tree; do
+  [[ -n "$id" ]] || continue
   (( assigned < need )) || break
   [[ "$(card_status "$file")" == "backlog" ]] || continue
-
-  id="$(card_field "$file" id)"
-  [[ -n "$id" ]] || id="$(basename "$file" .md)"
+  case "$issued" in *" $id "*) continue ;; esac
 
   owner=""
   for candidate in ${WORKERS[@]+"${WORKERS[@]}"}; do
@@ -342,7 +367,7 @@ for file in "$TASKS_DIR"/[0-9]*.md; do
   if (( DRY_RUN == 1 )); then
     echo "выдал бы #$id → $owner"
   else
-    if ! "$ROOT/bin/task-move.sh" "$id" todo --owner "$owner" >/dev/null 2>&1; then
+    if ! "$(mover_for "$file" "$from_tree")" "$id" todo --owner "$owner" >/dev/null 2>&1; then
       why="bin/task-move.sh отказал в выдаче #$id"
       break
     fi
@@ -350,10 +375,11 @@ for file in "$TASKS_DIR"/[0-9]*.md; do
   fi
 
   taken="$taken$owner "
+  issued="$issued$id "
   ids="$ids $id"
   owners="$owners $owner"
   assigned=$((assigned + 1))
-done
+done < "$SNAPSHOT_FILE"
 
 # Честный итог: если выдали меньше, чем не хватало, то из-за исчерпанного
 # backlog — важно, сколько именно выдали и сколько осталось недобрать.
