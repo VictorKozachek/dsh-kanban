@@ -61,8 +61,18 @@ while [[ $# -gt 0 ]]; do
         echo "--min требует значения: --min N" >&2
         exit 2
       fi
+      if [[ ! "$2" =~ ^[0-9]+$ ]]; then
+        echo "--min: ожидается целое неотрицательное число (получено: $2)" >&2
+        exit 2
+      fi
       MIN_OVERRIDE="$2"; shift 2 ;;
-    --min=*) MIN_OVERRIDE="${1#*=}"; shift ;;
+    --min=*)
+      MIN_OVERRIDE="${1#*=}"
+      if [[ ! "$MIN_OVERRIDE" =~ ^[0-9]+$ ]]; then
+        echo "--min: ожидается целое неотрицательное число (получено: $MIN_OVERRIDE)" >&2
+        exit 2
+      fi
+      shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "неизвестный аргумент: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -82,10 +92,24 @@ card_field() {
     }' "$1"
 }
 
-# Статус карточки в том же виде, в каком его понимает доска: без регистра,
-# кавычек и лишних пробелов.
+# Статус карточки в том же виде, в каком его понимает доска: регистр, пробелы и
+# основные синонимы. Полный список синонимов живёт в `watcher-core.js`
+# (`normalizeStatus`), но выдаче нужны только три статуса — очередь, бэклог и
+# работа, — поэтому здесь разворачиваются синонимы именно для них: карточка со
+# `status: wip` не должна выглядеть свободной.
 card_status() {
-  card_field "$1" status | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-'
+  local raw
+  raw="$(card_field "$1" status | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-')"
+  case "$raw" in
+    "" | new | "нужно-сделать") printf '%s' "todo" ;;
+    in_progress | progress | wip | doing | active | "в-работе") printf '%s' "in-progress" ;;
+    in_review | inreview | "code-review" | reviewing | review | "на-ревью" | "ревью") printf '%s' "in-review" ;;
+    test | verify | "на-проверке" | "тестирование") printf '%s' "testing" ;;
+    "ready-to-merge" | done | "готово") printf '%s' "ready" ;;
+    "влито" | "слито" | closed) printf '%s' "merged" ;;
+    hold | "заблокировано") printf '%s' "blocked" ;;
+    *) printf '%s' "$raw" ;;
+  esac
 }
 
 die_config() {
@@ -122,21 +146,26 @@ read_min_todo() {
 WORKERS=()
 read_workers() {
   if [[ -f "$WORKERS_FILE" ]]; then
-    local body rest id
+    local body built sep id
     body="$(tr -d '[:space:]' < "$WORKERS_FILE" 2>/dev/null || true)"
     case "$body" in
       \[*\]) ;;
       *) die_config "битый JSON в $WORKERS_FILE: ожидался массив [\"session-id\", ...]" ;;
     esac
-    # Кроме строк с id в массиве ничего быть не должно: после вырезания строк
-    # остаются только скобки и запятые.
-    rest="$(printf '%s' "$body" | sed 's/"[^"]*"//g')"
-    if [[ ! "$rest" =~ ^\[,*\]$ ]]; then
-      die_config "битый JSON в $WORKERS_FILE: элементы массива — строки в кавычках"
-    fi
+    built="["
+    sep=""
     while IFS= read -r id; do
-      [[ -n "$id" ]] && WORKERS+=("$id")
+      [[ -n "$id" ]] || continue
+      built="$built$sep\"$id\""
+      sep=","
+      WORKERS+=("$id")
     done < <(printf '%s' "$body" | grep -o '"[^"]*"' | tr -d '"' || true)
+    built="$built]"
+    # Собранный обратно массив должен совпасть с файлом: иначе в нём что-то
+    # лишнее — нет запятой между строками, числа или посторонние символы.
+    if [[ "$built" != "$body" ]]; then
+      die_config "битый JSON в $WORKERS_FILE: ожидался массив строк в кавычках, без лишних символов"
+    fi
     return 0
   fi
   if [[ -f "$ROLES_FILE" ]]; then

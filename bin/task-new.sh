@@ -37,7 +37,8 @@ usage() {
   --no-worktree  только карточка в текущей директории, без рабочего дерева
   --backlog      карточка сразу в backlog: status: backlog, owner пустой
                  (выдача из backlog — bin/task-move.sh <id> todo --owner <session-id>)
-  --spec NNN     ссылка на спецификацию .kanban/specs/NNN.md (поле spec)
+  --spec NNN     ссылка на спецификацию .kanban/specs/NNN.md (поле spec);
+                 годится и файл со слагом, NNN-название.md
 
 Задача с рабочим деревом: worktree worktrees/<id>, ветка task/<id>, карточка
 внутри ветки. Подробности — в комментарии в начале файла и в KANBAN.md.
@@ -81,15 +82,27 @@ if (( BACKLOG == 1 )) && [[ -n "$OWNER" ]]; then
 fi
 
 # Спецификация: номер числовой и файл должен существовать — иначе карточка
-# ссылается в пустоту и нарезку не найти.
+# ссылается в пустоту и нарезку не найти. Файл спеки лежит либо как `<NNN>.md`,
+# либо со слагом — `<NNN>-название.md` (так они и лежат в репозитории): номер
+# занимает числовой префикс, а в карточку пишется только номер.
 if [[ -n "$SPEC" ]]; then
   if [[ ! "$SPEC" =~ ^[0-9]+$ ]]; then
     echo "--spec: ожидается номер спецификации, например 001 (получено: $SPEC)" >&2
     exit 2
   fi
   SPEC="$(printf '%03d' "$((10#$SPEC))")"
-  if [[ ! -f "$ROOT/.kanban/specs/$SPEC.md" ]]; then
-    echo "--spec $SPEC: нет файла .kanban/specs/$SPEC.md — заведите спеку bin/spec-new.sh" >&2
+  spec_file=""
+  if [[ -f "$ROOT/.kanban/specs/$SPEC.md" ]]; then
+    spec_file="$ROOT/.kanban/specs/$SPEC.md"
+  else
+    for candidate in "$ROOT"/.kanban/specs/"$SPEC"-*.md; do
+      [[ -e "$candidate" ]] || continue
+      spec_file="$candidate"
+      break
+    done
+  fi
+  if [[ -z "$spec_file" ]]; then
+    echo "--spec $SPEC: нет файла .kanban/specs/$SPEC.md или $SPEC-*.md — заведите спеку bin/spec-new.sh" >&2
     exit 2
   fi
 fi

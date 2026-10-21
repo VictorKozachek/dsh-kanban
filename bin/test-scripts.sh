@@ -240,6 +240,35 @@ else
   pass "task-new.sh --spec на несуществующую спеку отвергается"
 fi
 
+echo "== спецификации: номер — числовой префикс имени (001-backlog.md занимает 001)"
+slug_repo="$WORK/spec-slug"
+make_repo "$slug_repo"
+mkdir -p "$slug_repo/.kanban/specs"
+printf '# Спека 001: бэклог\n\nСтатус: принята.\n' > "$slug_repo/.kanban/specs/001-backlog.md"
+if ( cd "$slug_repo" && ./bin/spec-new.sh "Следующая" >"$WORK/spec3" 2>&1 ) &&
+   [[ -f "$slug_repo/.kanban/specs/002.md" ]] &&
+   [[ ! -e "$slug_repo/.kanban/specs/001.md" ]]; then
+  pass "spec-new не выдаёт номер, занятый спекой со слагом"
+else
+  fail "slug-нумерация: $(cat "$WORK/spec3" 2>/dev/null); $(ls "$slug_repo/.kanban/specs" 2>/dev/null)"
+fi
+if ( cd "$slug_repo" && ./bin/task-new.sh "Задача из спеки со слагом" --no-worktree --spec 001 >/dev/null 2>&1 ) &&
+   grep -q '^spec: "001"' "$slug_repo/.kanban/tasks/001.md"; then
+  pass "task-new.sh --spec 001 работает при файле 001-backlog.md"
+else
+  fail "--spec по слагу: $(grep '^spec:' "$slug_repo/.kanban/tasks/001.md" 2>/dev/null)"
+fi
+# Дыра в нумерации: 001-backlog, 003 и 004-ещё — следующий свободный номер 002.
+rm -f "$slug_repo/.kanban/specs/002.md"
+printf '# Спека 003\n' > "$slug_repo/.kanban/specs/003.md"
+printf '# Спека 004\n\nСтатус: черновик.\n' > "$slug_repo/.kanban/specs/004-ещё.md"
+if ( cd "$slug_repo" && ./bin/spec-new.sh "В дыру" >"$WORK/spec4" 2>&1 ) &&
+   [[ -f "$slug_repo/.kanban/specs/002.md" ]]; then
+  pass "spec-new берёт первый свободный номер (002 в дыре 001/003/004)"
+else
+  fail "дыра в нумерации: $(ls "$slug_repo/.kanban/specs" 2>/dev/null)"
+fi
+
 echo "== выдача из бэклога: минимум todo, FIFO по id, пул исполнителей"
 fill_repo="$WORK/fill"
 make_repo "$fill_repo"
@@ -318,6 +347,40 @@ if [[ "$fill_code" == "1" ]] && grep -q "minTodo" "$WORK/fill6"; then
   pass "битый board.json — код 1 и объяснение"
 else
   fail "битый конфиг: код $fill_code, $(cat "$WORK/fill6" 2>/dev/null)"
+fi
+
+# Синоним статуса как на доске: wip — это in-progress, исполнитель занят.
+edge_card="$edge_repo/.kanban/tasks/001.md"
+awk '{ if ($0 == "status: in-progress") print "status: wip"; else print }' "$edge_card" > "$edge_card.tmp" &&
+  mv "$edge_card.tmp" "$edge_card"
+printf '{"minTodo": 2}\n' > "$edge_repo/.kanban/board.json"
+fill_code=0
+( cd "$edge_repo" && ./bin/backlog-fill.sh >"$WORK/fill9" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "3" ]] && grep -q "нет свободных исполнителей" "$WORK/fill9" &&
+   grep -q '^status: backlog' "$edge_repo/.kanban/tasks/003.md"; then
+  pass "status wip считается работой: занятой сессии задача не идёт"
+else
+  fail "wip как in-progress: код $fill_code, $(cat "$WORK/fill9" 2>/dev/null)"
+fi
+
+# Пул без запятой — битый JSON, а не «две сессии».
+printf '["sess-a" "sess-b"]\n' > "$edge_repo/.kanban/.workers.json"
+fill_code=0
+( cd "$edge_repo" && ./bin/backlog-fill.sh >"$WORK/fill10" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "1" ]] && grep -q "workers.json" "$WORK/fill10"; then
+  pass "массив пула без запятой — код 1"
+else
+  fail "битый пул: код $fill_code, $(cat "$WORK/fill10" 2>/dev/null)"
+fi
+printf '["sess-a","sess-b"]\n' > "$edge_repo/.kanban/.workers.json"
+
+# Ошибка использования --min — код 2, а не ошибка конфига.
+fill_code=0
+( cd "$edge_repo" && ./bin/backlog-fill.sh --min abc >"$WORK/fill11" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "2" ]] && grep -q -- "--min" "$WORK/fill11"; then
+  pass "--min с мусором — код 2 (ошибка использования)"
+else
+  fail "--min abc: код $fill_code, $(cat "$WORK/fill11" 2>/dev/null)"
 fi
 
 empty_repo="$WORK/fill-empty"
