@@ -184,9 +184,15 @@ assert.ok(
 );
 assert.equal(
   COLUMNS.map((column) => column.id).join(","),
-  "todo,in-progress,in-review,testing,ready,merged,blocked",
-  "порядок колонок: ревью идёт сразу после работы"
+  "backlog,todo,in-progress,in-review,testing,ready,merged,blocked",
+  "порядок колонок: бэклог первым, дальше очередь, работа, ревью, тесты, слияние, блокировка"
 );
+
+// backlog — не синоним todo: своя колонка в начале доски.
+assert.equal(normalizeStatus("backlog"), "backlog", "backlog должен остаться своим статусом");
+assert.equal(normalizeStatus(" Backlog "), "backlog", "регистр и пробелы нормализуются");
+assert.notEqual(normalizeStatus("backlog"), "todo", "backlog больше не алиас todo");
+assert.equal(COLUMNS[0].id, "backlog", "первая колонка доски — бэклог");
 const card9 = parseCard(
   "009.md",
   "---\nid: 009\ntitle: Из ревью\nstatus: in-review\nrole: reviewer\n"
@@ -227,6 +233,14 @@ assert.equal(card.owner, "session-abc");
 assert.equal(card.branch, "task/007");
 assert.equal(card.note, "тесты 12/12");
 assert.equal(card.file, ".kanban/tasks/007.md");
+
+// Карточка из бэклога: статус собственный, владельца нет.
+const backlogCard = parseCard(
+  "010.md",
+  '---\nid: "010"\ntitle: Из бэклога\nstatus: backlog\nowner: ""\n---\n'
+);
+assert.equal(backlogCard.status, "backlog", "статус backlog читается как backlog");
+assert.equal(backlogCard.owner, "", "у карточки в бэклоге владельца нет");
 
 // Карточка без front matter: id из имени файла, статус из тела.
 const bare = parseCard("012.md", "# Починить сборку\n\nСтатус: in-progress\n");

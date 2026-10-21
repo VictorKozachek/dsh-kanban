@@ -187,6 +187,9 @@ const TASKS = {
   ".kanban/tasks/005.md":
     "---\nid: 005\ntitle: Инсталлятор пресетов\nstatus: ready\nowner: session-1a2b3c4d-77f0\nrole: reviewer\ntokens: 6000\ntokens_reviewer: 6000\nbranch: task/005\nsince: 2026-09-23T15:31:00Z\nupdated: 2026-09-23T15:31:00Z\n" +
     "note: \"" + "Длинный отчёт о прогоне. ".repeat(20) + "\"\n---\n",
+  // Карточка из бэклога: статус свой, владельца нет — подпись «не назначено».
+  ".kanban/tasks/007.md":
+    "---\nid: 007\ntitle: Спека бэклога\nstatus: backlog\nowner: \"\"\nupdated: 2026-09-23T15:45:00Z\n---\n",
   "/tmp/awg-t002/.kanban/tasks/002.md":
     "---\nid: 002\ntitle: Колонки и карточки\nstatus: in-progress\nowner: session-71bd0c3e-4a92\nbranch: task/002\nupdated: 2026-09-23T15:40:00Z\n---\n"
 };
@@ -202,7 +205,8 @@ function makeRemote(overrides = {}) {
           entries: [
             { name: "001.md", type: "file", size: 100 },
             { name: "005.md", type: "file", size: 120 },
-            { name: "003.md", type: "file", size: 110 }
+            { name: "003.md", type: "file", size: 110 },
+            { name: "007.md", type: "file", size: 90 }
           ]
         }
       }),
@@ -436,10 +440,18 @@ assert.equal(captured.titles[0].key, "dsh-kanban");
 
 // Отрисовка
 assert.match(text, /Канбан/, "в дереве есть заголовок доски");
-assert.match(text, /awg · 4 карточек/, "в подписи — имя рабочей директории и число карточек");
-for (const label of ["Нужно сделать", "В работе", "Тестирование", "Готово к слиянию", "Влито", "Заблокировано"]) {
+assert.match(text, /awg · 5 карточек/, "в подписи — имя рабочей директории и число карточек");
+for (const label of ["Бэклог", "Нужно сделать", "В работе", "Тестирование", "Готово к слиянию", "Влито", "Заблокировано"]) {
   assert.ok(text.includes(label), `нет колонки «${label}»`);
 }
+// Колонка backlog — первая, и карточка без владельца подписана «не назначено».
+assert.equal(
+  collectAttrs(tree, "data-kanban-column")[0],
+  "backlog",
+  "первая колонка доски — backlog"
+);
+assert.ok(text.includes("не назначено"), "у карточки без владельца должна быть подпись «не назначено»");
+assert.ok(text.includes("#007") && text.includes("Спека бэклога"), "карточка из бэклога не отрисована");
 assert.ok(text.includes("#001") && text.includes("Скелет плагина"), "карточка из основного чекаута не отрисована");
 assert.ok(text.includes("#002") && text.includes("Колонки и карточки"), "карточка из worktree не отрисована");
 assert.ok(text.includes("#005"), "третья карточка не отрисована");
@@ -456,8 +468,8 @@ assert.ok(text.includes("session-71bd…"), "чип владельца не от
 // Порядок в дереве — по колонкам, внутри колонки — по id.
 assert.equal(
   collectAttrs(tree, "data-kanban-card").join(","),
-  "002,003,005,001",
-  "карточки идут по колонкам, внутри колонки — по id"
+  "007,002,003,005,001",
+  "карточки идут по колонкам (backlog первой), внутри колонки — по id"
 );
 // Длинная заметка обрезается в видимом тексте, но целиком остаётся в title.
 const fullNote = "Длинный отчёт о прогоне. ".repeat(20);
@@ -467,7 +479,7 @@ assert.ok(JSON.stringify(tree).includes(fullNote), "полный текст за
 
 assert.equal(
   collectAttrs(tree, "data-kanban-status").join(","),
-  "in-progress,in-progress,ready,merged",
+  "backlog,in-progress,in-progress,ready,merged",
   "статусы карточек соответствуют своим колонкам"
 );
 

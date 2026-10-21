@@ -25,18 +25,22 @@ const FIELDS = ["id", "title", "status", "owner", "role", "updated"];
  */
 /**
  * Канонические колонки доски — те же id, что в `COLUMNS` клиентской половины.
+ *
+ * `backlog` — не синоним `todo`, а отдельный статус: нарезанные заранее задачи,
+ * ещё не выданные исполнителю. Поэтому он первый и в списке колонок, и на доске.
  */
-export const COLUMN_IDS = ["todo", "in-progress", "in-review", "testing", "ready", "merged", "blocked"];
+export const COLUMN_IDS = ["backlog", "todo", "in-progress", "in-review", "testing", "ready", "merged", "blocked"];
 
 /**
  * Нормализация статуса: та же логика, что в клиентской половине
  * (`lib/client.js`, `__internals.normalizeStatus`) — регистр, пробелы и синонимы
  * (`in_progress`, `wip`, `done`, «заблокировано»). Половинки живут в разных
  * модульных системах, поэтому копий две; их согласие проверяет `test/merge.test.mjs`.
+ *
+ * `backlog` здесь синонимом не записан: он приходит из `COLUMN_IDS` как есть.
  */
 export const STATUS_ALIASES = {
   todo: "todo",
-  backlog: "todo",
   new: "todo",
   "нужно-сделать": "todo",
   "in-progress": "in-progress",

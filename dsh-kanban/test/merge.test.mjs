@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-import { isNewer as coreIsNewer, normalizeStatus as coreNormalize, parseCard as coreParseCard } from "../lib/watcher-core.js";
+import { COLUMN_IDS as coreColumnIds, isNewer as coreIsNewer, normalizeStatus as coreNormalize, parseCard as coreParseCard } from "../lib/watcher-core.js";
 
 const source = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
 let entry = null;
@@ -83,8 +83,8 @@ for (const [name, candidate, current, expected] of CASES) {
 
 // Статус на доске терпим к регистру, пробелам и синонимам — дамп обязан совпадать.
 const STATUS_CASES = [
-  "todo", "in-progress", "in-review", "testing", "ready", "merged", "blocked",
-  "ready ", "  merged  ", "In Review", "IN_PROGRESS", "in_progress", "wip", "doing",
+  "backlog", "todo", "in-progress", "in-review", "testing", "ready", "merged", "blocked",
+  "Backlog", " BACKLOG ", "ready ", "  merged  ", "In Review", "IN_PROGRESS", "in_progress", "wip", "doing",
   "done", "заблокировано", "ревью", "тестирование", "слито", "hold", "closed",
   "нечто-своё", "", null
 ];
@@ -95,11 +95,25 @@ check("нормализация статуса совпадает с плаги�
   }
 });
 
+check("backlog — свой статус, а не синоним todo в обеих половинах", () => {
+  for (const half of [coreNormalize, clientNormalize]) {
+    assert.equal(half("backlog"), "backlog");
+    assert.notEqual(half("backlog"), "todo");
+  }
+});
+
+check("порядок колонок совпадает в обеих половинах", () => {
+  const clientColumns = plugin.__internals.COLUMNS.map((column) => column.id);
+  assert.deepEqual([...clientColumns], [...coreColumnIds], "клиент и ядро разошлись по колонкам");
+  assert.equal(clientColumns[0], "backlog", "первая колонка — бэклог");
+});
+
 const CARD_TEXTS = [
   '---\nid: "001"\nstatus: "ready "\ntitle: Пробельный статус\n---\n',
   '---\nid: "002"\nstatus: In Review\ntitle: Регистр\n---\n',
   '---\nid: "003"\nstatus: заблокировано\ntitle: Синоним\n---\n',
-  '---\nid: "004"\nstatus: wip\ntitle: Без кавычек\nupdated: 2026-10-15T10:00:00Z\n---\n'
+  '---\nid: "004"\nstatus: wip\ntitle: Без кавычек\nupdated: 2026-10-15T10:00:00Z\n---\n',
+  '---\nid: "005"\nstatus: backlog\ntitle: Из бэклога\nowner: ""\n---\n'
 ];
 
 // Сверяем не сырое значение, а колонку: каждая половина читает карточку сама и

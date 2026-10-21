@@ -15,23 +15,40 @@
 # В основной чекаут карточка попадает слиянием ветки.
 #
 # Использование:
-#   bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree]
+#   bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree] [--backlog]
+#
+# --backlog — завести карточку сразу со `status: backlog` и пустым `owner`: это
+# лог нарезанных заранее задач. Из backlog задачу выдают в todo асайном:
+# bin/task-move.sh <id> todo --owner <session-id>.
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
-  sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'
+  cat <<'EOF'
+Использование:
+  bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree] [--backlog]
+
+  --owner ID     сразу закрепить карточку за сессией (выдача в todo)
+  --no-worktree  только карточка в текущей директории, без рабочего дерева
+  --backlog      карточка сразу в backlog: status: backlog, owner пустой
+                 (выдача из backlog — bin/task-move.sh <id> todo --owner <session-id>)
+
+Задача с рабочим деревом: worktree worktrees/<id>, ветка task/<id>, карточка
+внутри ветки. Подробности — в комментарии в начале файла и в KANBAN.md.
+EOF
 }
 
 TITLE=""
 OWNER=""
 WITH_WORKTREE=1
+BACKLOG=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-worktree) WITH_WORKTREE=0; shift ;;
+    --backlog) BACKLOG=1; shift ;;
     --owner) OWNER="${2:?--owner требует значения}"; shift 2 ;;
     --owner=*) OWNER="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -46,6 +63,13 @@ done
 if [[ -z "$TITLE" ]]; then
   echo "нужно название задачи" >&2
   usage >&2
+  exit 2
+fi
+
+# backlog — это лог задач без владельца: асайн делается отдельным переходом
+# backlog → todo --owner, поэтому сочетать --backlog с --owner нельзя.
+if (( BACKLOG == 1 )) && [[ -n "$OWNER" ]]; then
+  echo "--backlog не сочетается с --owner: асайн — это переход backlog → todo --owner <id>" >&2
   exit 2
 fi
 
@@ -80,8 +104,13 @@ write_card() {
     printf -- '---\n'
     printf 'id: "%s"\n' "$id"
     printf 'title: "%s"\n' "${TITLE//\"/\\\"}"
-    printf 'status: todo\n'
-    if [[ -n "$OWNER" ]]; then printf 'owner: "%s"\n' "$OWNER"; else printf 'owner: ""\n'; fi
+    if (( BACKLOG == 1 )); then
+      printf 'status: backlog\n'
+      printf 'owner: ""\n'
+    else
+      printf 'status: todo\n'
+      if [[ -n "$OWNER" ]]; then printf 'owner: "%s"\n' "$OWNER"; else printf 'owner: ""\n'; fi
+    fi
     printf 'role: ""\n'
     printf 'tokens: ""\n'
     printf 'since: ""\n'
@@ -130,7 +159,11 @@ if (( created_worktree == 1 )); then
   echo
   echo "дальше:"
   echo "  1. в DSH Web добавьте Workspace «${worktree}» и создайте в нём сессию с пресетом worker"
-  echo "  2. закрепите задачу за этой сессией: bin/task-move.sh $id todo --owner <session-id>"
+  if (( BACKLOG == 1 )); then
+    echo "  2. задача лежит в backlog: выдайте её асайном bin/task-move.sh $id todo --owner <session-id>"
+  else
+    echo "  2. закрепите задачу за этой сессией: bin/task-move.sh $id todo --owner <session-id>"
+  fi
   echo "  3. в сессии: bin/task-move.sh $id in-progress --owner \"\$DSH_SESSION_ID\" --role worker"
   echo "  4. доска сама читает карточки из $worktrees_dir_name/ — board-sync.sh нужен только для worktree вне проекта"
 else

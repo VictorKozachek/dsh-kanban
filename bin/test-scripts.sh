@@ -151,6 +151,56 @@ else
   fail "--force не сработал"
 fi
 
+echo "== бэклог: карточка без владельца, асайн в todo, запрет прыжка в работу"
+backlog_repo="$WORK/backlog"
+make_repo "$backlog_repo"
+if ( cd "$backlog_repo" && ./bin/task-new.sh "Задача в бэклог" --no-worktree --backlog >"$WORK/backlog1" 2>&1 ); then
+  pass "task-new.sh --backlog заводит карточку"
+else
+  fail "task-new.sh --backlog: $(cat "$WORK/backlog1")"
+fi
+backlog_card="$backlog_repo/.kanban/tasks/001.md"
+if grep -q '^status: backlog' "$backlog_card" && grep -q '^owner: ""' "$backlog_card"; then
+  pass "карточка в backlog без владельца"
+else
+  fail "карточка бэклога: $(grep -E '^(status|owner):' "$backlog_card")"
+fi
+if ( cd "$backlog_repo" && ./bin/task-new.sh "С владельцем" --no-worktree --backlog --owner sess-x >"$WORK/backlog2" 2>&1 ); then
+  fail "--backlog с --owner должен отвергаться"
+else
+  pass "--backlog с --owner отвергается"
+fi
+if ( cd "$backlog_repo" && ./bin/task-move.sh 001 in-progress --owner sess-x >"$WORK/backlog3" 2>&1 ); then
+  fail "backlog → in-progress должен быть запрещён"
+else
+  if grep -q "недопустимый переход" "$WORK/backlog3"; then
+    pass "backlog → in-progress запрещён с объяснением"
+  else
+    fail "сообщение: $(cat "$WORK/backlog3")"
+  fi
+fi
+if ( cd "$backlog_repo" && ./bin/task-move.sh 001 todo >"$WORK/backlog4" 2>&1 ); then
+  fail "backlog → todo без --owner должен отвергаться"
+else
+  if grep -q "асайн" "$WORK/backlog4"; then
+    pass "backlog → todo без --owner отвергается как асайн"
+  else
+    fail "сообщение: $(cat "$WORK/backlog4")"
+  fi
+fi
+if ( cd "$backlog_repo" && ./bin/task-move.sh 001 todo --owner sess-worker >/dev/null 2>&1 ) &&
+   grep -q '^status: todo' "$backlog_card" && grep -q '^owner: sess-worker' "$backlog_card"; then
+  pass "backlog → todo --owner закрепляет задачу за исполнителем"
+else
+  fail "асайн не сработал: $(grep -E '^(status|owner):' "$backlog_card")"
+fi
+if ( cd "$backlog_repo" && ./bin/task-move.sh 001 backlog >/dev/null 2>&1 ) &&
+   grep -q '^status: backlog' "$backlog_card" && grep -q '^owner: ""' "$backlog_card"; then
+  pass "todo → backlog возвращает задачу в очередь без владельца"
+else
+  fail "возврат в очередь: $(grep -E '^(status|owner):' "$backlog_card")"
+fi
+
 echo "== коммит задачи: правило сообщения, ключ трекера, закрытый ready → merged"
 commit_repo="$WORK/commit"
 make_repo "$commit_repo"

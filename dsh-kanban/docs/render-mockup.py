@@ -42,6 +42,7 @@ PALETTE = {
 }
 
 COLUMN_LABELS = {
+    "backlog": "Бэклог",
     "todo": "Нужно сделать",
     "in-progress": "В работе",
     "in-review": "На ревью",

@@ -18,6 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
 
 const COLUMNS = [
+  ["backlog", "бэклог"],
   ["todo", "нужно сделать"],
   ["in-progress", "в работе"],
   ["in-review", "ревью"],

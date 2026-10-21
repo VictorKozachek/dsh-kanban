@@ -42,9 +42,16 @@ window.__ModuleLoader__.load({
     /** Сколько строк карточки читать (front matter + тело задачи). */
     const MAX_LINES = 400;
 
-    /** Колонки доски в порядке показа. */
+    /**
+     * Колонки доски в порядке показа.
+     *
+     * `backlog` — лог нарезанных заранее задач: карточки там лежат без владельца,
+     * пока оркестратор не выдаст их в `todo`. Поэтому он первый и нейтральный
+     * (слейт), а `todo` сдвинут на розовый, чтобы очередь не сливалась с логом.
+     */
     const COLUMNS = [
-      { id: "todo", color: "#94a3b8" },
+      { id: "backlog", color: "#94a3b8" },
+      { id: "todo", color: "#ec4899" },
       { id: "in-progress", color: "#3b82f6" },
       { id: "in-review", color: "#06b6d4" },
       { id: "testing", color: "#f59e0b" },
@@ -56,10 +63,13 @@ window.__ModuleLoader__.load({
     const COLUMN_BY_ID = {};
     for (const column of COLUMNS) COLUMN_BY_ID[column.id] = column;
 
-    /** Синонимы статусов: и английские, и русские, чтобы агенты не спотыкались. */
+    /**
+     * Синонимы статусов: и английские, и русские, чтобы агенты не спотыкались.
+     * `backlog` синонимом не записан: это отдельная колонка, и `normalizeStatus`
+     * возвращает её как есть.
+     */
     const STATUS_ALIASES = {
       todo: "todo",
-      backlog: "todo",
       new: "todo",
       "нужно-сделать": "todo",
       "in-progress": "in-progress",
@@ -844,10 +854,10 @@ window.__ModuleLoader__.load({
 
     const ru = {
       title: "Канбан",
-      guide: "Задачи агентов: что в очереди, что в работе, что на ревью, что на проверке и что уже влито",
+      guide: "Задачи агентов: что заготовлено в бэклоге, что в очереди, что в работе, что на ревью, что на проверке и что уже влито",
       cards: "карточек",
       noWorkspace: "нет рабочей директории",
-      noOwner: "не назначен",
+      noOwner: "не назначено",
       inBranch: "в ветке",
       tokens: "токенов",
       since: "с",
@@ -866,6 +876,7 @@ window.__ModuleLoader__.load({
       problems: "Часть карточек не прочитана",
       truncated: "Список файлов обрезан (слишком много карточек)",
       missing: "Карточек пока нет: каталог .kanban/tasks пуст или отсутствует.",
+      "column.backlog": "Бэклог",
       "column.todo": "Нужно сделать",
       "column.in-progress": "В работе",
       "column.in-review": "На ревью",
@@ -877,7 +888,7 @@ window.__ModuleLoader__.load({
 
     const en = {
       title: "Kanban",
-      guide: "Agent tasks: queued, in progress, in review, in testing, and merged",
+      guide: "Agent tasks: what is queued in the backlog, in progress, in review, in testing, and merged",
       cards: "cards",
       noWorkspace: "no workspace",
       noOwner: "unassigned",
@@ -899,6 +910,7 @@ window.__ModuleLoader__.load({
       problems: "Some cards could not be read",
       truncated: "File listing truncated (too many cards)",
       missing: "No cards yet: .kanban/tasks is empty or missing.",
+      "column.backlog": "Backlog",
       "column.todo": "Todo",
       "column.in-progress": "In progress",
       "column.in-review": "In review",

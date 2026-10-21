@@ -116,7 +116,7 @@ function cardHtml(card) {
       : "",
     card.owner
       ? `<span style="${css(styles.owner)}" title="${escapeHtml(card.owner)}">${escapeHtml(shortOwner(card.owner))}</span>`
-      : `<span style="${css(styles.ownerEmpty)}">не назначен</span>`,
+      : `<span style="${css(styles.ownerEmpty)}">не назначено</span>`,
     `</div>`,
     `<div style="${css(
       card.status === "merged" ? Object.assign({}, styles.cardTitle, styles.cardTitleMerged) : styles.cardTitle
@@ -169,6 +169,7 @@ function boardHtml() {
 }
 
 const COLUMN_LABELS = {
+  backlog: "Бэклог",
   todo: "Нужно сделать",
   "in-progress": "В работе",
   "in-review": "На ревью",

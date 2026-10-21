@@ -7,19 +7,25 @@
 #                                  [--tokens auto|N] [--branch ВЕТКА]
 #                                  [--worktree ПУТЬ] [--no-commit] [--force]
 #
-# Статусы: todo | in-progress | in-review | testing | ready | merged | blocked
+# Статусы: backlog | todo | in-progress | in-review | testing | ready | merged | blocked
 #
 # Разрешённые переходы (протокол — в AGENTS.md):
+#   backlog     → todo | blocked            асайн (с --owner) или «упёрлась до выдачи»
 #   todo        → in-progress               исполнитель берёт задачу
+#   todo        → backlog                   возврат в очередь: задача ещё не выдана
 #   in-progress → in-review                 работа сдана на код-ревью
 #   in-review   → in-progress | testing     ревьювер вернул или принял
 #   testing     → ready | in-progress       тестировщик принял или вернул
 #   ready       → in-progress               оркестратор вернул (конфликт);
 #                                            merged — только bin/task-commit.sh
-#   todo|in-progress|in-review|testing|ready → blocked  исполнителю нужен человек
+#   backlog|todo|in-progress|in-review|testing|ready → blocked  нужен человек
 #   blocked     → in-progress               развязка получена
 #   любой       → тот же статус             повторная запись полей
 # Недопустимый переход отвергается; --force выполняет его молча.
+#
+# `backlog` — лог задач: у карточки там нет владельца и роли, поэтому переход
+# `backlog → todo` требует `--owner` (это асайн), а прыжок `backlog → in-progress`
+# запрещён: сначала выдача в `todo`, чтобы исполнитель получил наряд.
 #
 # Карточка коммитится в текущую ветку (если это git-репозиторий), чтобы смена
 # статуса уехала в слияние вместе с задачей. --no-commit отключает это.
@@ -28,13 +34,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TASKS_DIR="$ROOT/.kanban/tasks"
-STATUSES=(todo in-progress in-review testing ready merged blocked)
+STATUSES=(backlog todo in-progress in-review testing ready merged blocked)
 
 # Какие переходы разрешает протокол (см. AGENTS.md). Повторная запись того же
 # статуса разрешена всегда: так обновляют owner и note, не двигая карточку.
 allowed_targets() {
   case "$1" in
-    "" | todo) printf '%s' "in-progress, blocked" ;;
+    "" | todo) printf '%s' "in-progress, backlog, blocked" ;;
+    backlog) printf '%s' "todo, blocked" ;;
     in-progress) printf '%s' "in-review, blocked" ;;
     in-review) printf '%s' "in-progress, testing, blocked" ;;
     testing) printf '%s' "ready, in-progress, blocked" ;;
@@ -152,6 +159,15 @@ if (( FORCE == 0 )) && ! is_allowed_transition "$current" "$status"; then
   exit 3
 fi
 
+# Асайн — отдельное действие: из backlog задачу выдают в todo сразу с владельцем.
+# Без --owner карточка просто вернулась бы в очередь без хозяина, и исполнитель
+# не получил бы наряда — поэтому такой переход отвергаем, а не делаем молча.
+if (( FORCE == 0 )) && [[ "$current" == "backlog" && "$status" == "todo" && -z "$OWNER" ]]; then
+  echo "переход backlog → todo — это асайн: передайте --owner <session-id> исполнителя" >&2
+  echo "задача $id осталась в backlog; протокол выдачи — AGENTS.md, пункт 6" >&2
+  exit 3
+fi
+
 # Задачу выдаёт оркестратор: в работу берут только закреплённое за собой.
 # Незакреплённую карточку не берут самовольно, чужую — тем более: иначе двое
 # сделают одну работу. Осознанный обход — --force.
@@ -160,7 +176,8 @@ fi
 # из очереди (todo или пустой статус) и из блокировки (blocked — «нужен человек»,
 # снимает её исполнитель). Возвраты из ревью, тестов и готового к слиянию
 # (in-review/testing/ready) делает другая роль — их guard не касается, иначе
-# ревьювер не смог бы вернуть карточку без --force.
+# ревьювер не смог бы вернуть карточку без --force. Карточка в backlog владельца
+# не имеет вовсе, а получает его асайном — этот guard на неё не опирается.
 #
 # Без этого правила карточку уводили в работу в два шага: todo → blocked →
 # in-progress — блокировку ставит кто угодно, а снятие проверок не имело.
@@ -249,6 +266,15 @@ set_field status "$status"
 set_field updated "$stamp"
 [[ -n "$OWNER" ]] && set_field owner "$(yaml_value "$OWNER")"
 [[ -n "$ROLE" ]] && set_field role "$(yaml_value "$ROLE")"
+
+# В backlog карточка лежит без владельца и роли: это лог нарезанных задач, а не
+# чья-то работа. Снимаем оба поля и здесь, а не только при возврате в очередь:
+# так карточка, заведённая с --owner или переведённая из todo, не выглядит
+# закреплённой, пока оркестратор не выдал её в todo.
+if [[ "$status" == "backlog" ]]; then
+  set_field owner '""'
+  set_field role '""'
+fi
 
 # Расход токенов: снимок кумулятивного счётчика сессии на момент передачи.
 # Поле на роль, чтобы по карточке было видно, кто сколько съел.
