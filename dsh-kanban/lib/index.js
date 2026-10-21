@@ -91,11 +91,13 @@ function mainTasksDir(root) {
  * проекта) здесь не читается — это отдельная задача.
  *
  * @param root - корень проекта из `config.boards`.
- * @returns Список `{ dir, worktree }`; `worktree` — путь дерева относительно
- *   корня проекта, `null` — основная доска.
+ * @returns Список `{ dir, worktree, cardFile }`; `worktree` — путь дерева
+ *   относительно корня проекта, `null` — основная доска; `cardFile` — единственный
+ *   файл, который в этом источнике считается живой карточкой задачи (пусто —
+ *   читать все).
  */
 function boardSources(root) {
-  const sources = [{ dir: mainTasksDir(root), worktree: null }];
+  const sources = [{ dir: mainTasksDir(root), worktree: null, cardFile: "" }];
   for (const trees of WORKTREES_DIRS) {
     let names;
     try {
@@ -110,7 +112,12 @@ function boardSources(root) {
       } catch {
         continue; // не дерево (файл, мусор) или исчезло между обходом и проверкой
       }
-      sources.push({ dir, worktree: `${trees}/${name}` });
+      // Дерево ветвится от основной ветки и наследует все карточки, поэтому живая
+      // карточка задачи — только одноимённая с деревом. Остальные копии — эхо
+      // основной ветки, и приписывать им чужое дерево нельзя (иначе наряд позовёт
+      // править чужую задачу в чужой ветке). То же правило в клиентской половине
+      // (`lib/client.js`) и в `bin/board-status.mjs`.
+      sources.push({ dir, worktree: `${trees}/${name}`, cardFile: `${name}.md` });
     }
   }
   return sources;
@@ -144,8 +151,13 @@ function watchDirs(root) {
   return dirs;
 }
 
-/** Прочитать карточки одного каталога; `null` — каталог недоступен. */
-function readCards(dir) {
+/**
+ * Прочитать карточки каталога; `null` — каталог недоступен.
+ *
+ * @param dir - каталог карточек.
+ * @param cardFile - читать только этот файл (доска рабочего дерева), пусто — все.
+ */
+function readCards(dir, cardFile = "") {
   let names;
   try {
     names = fs.readdirSync(dir);
@@ -155,6 +167,7 @@ function readCards(dir) {
   const entries = [];
   for (const name of names) {
     if (!name.endsWith(".md")) continue;
+    if (cardFile !== "" && name !== cardFile) continue;
     try {
       entries.push([name, fs.readFileSync(path.join(dir, name), "utf8")]);
     } catch {
@@ -217,7 +230,7 @@ function readSnapshot(root) {
   const merged = new Map();
   let found = false;
   for (const source of boardSources(root)) {
-    const entries = readCards(source.dir);
+    const entries = readCards(source.dir, source.cardFile);
     if (entries === null) continue;
     // Без основного каталога доски нет — сторож по ней не запускается. Рабочее
     // дерево, наоборот, могло исчезнуть: это норма, а не повод молчать.
@@ -226,7 +239,12 @@ function readSnapshot(root) {
     for (const [name, text] of entries) {
       fields.set(name.replace(/\.md$/, ""), worktreeField(text));
     }
+    const liveId = source.cardFile ? source.cardFile.replace(/\.md$/, "") : "";
     for (const [id, card] of snapshotCards(entries)) {
+      // В рабочем дереве живая карточка — ровно та, что названа каталогом: файл с
+      // чужим `id` внутри (испорченная копия) не должен приписать карточке чужое
+      // дерево, иначе наряд позовёт править чужую задачу в чужой ветке.
+      if (liveId && String(card.id) !== liveId) continue;
       card.source = source.worktree ? "worktree" : "main";
       card.worktree = source.worktree ?? displayWorktree(root, fields.get(id) ?? "");
       const current = merged.get(card.id);
@@ -273,10 +291,14 @@ function readMinTodo(file) {
  * дерева — исполнитель и ревьювер должны работать там, а не в основном чекауте
  * (в основном чекауте копия карточки старая, а файлы задачи — в дереве).
  *
+ * Наряд о слиянии — исключение: он адресован оркестратору, а `bin/task-commit.sh`
+ * из рабочего дерева задачи отказывается работать и просит основной чекаут.
+ *
  * Решение о том, кого будить, остаётся в ядре (`watcher-core.js`): здесь только
  * текст.
  */
 function noticeText(item) {
+  if (item?.kind === "merge") return item.text;
   const dir = String(item?.worktree ?? "");
   if (dir === "") return item.text;
   return `${item.text}\n\nКарточка в ${dir} — работай там: команды выполняй из этого каталога.`;

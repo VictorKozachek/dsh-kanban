@@ -114,6 +114,11 @@ function config(board, extra = {}) {
   return { boards: [board], roles: ROLES, debounceMs: 20, ...extra };
 }
 
+/** `board.json` с выключенным сигналом о недоборе: он в этих тестах не про нас. */
+function silenceRefill(board) {
+  fs.writeFileSync(path.join(board, ".kanban", "board.json"), '{\n  "minTodo": 0\n}\n');
+}
+
 console.log("== обзор worktrees: снимок доски из нескольких источников");
 
 await check("переход карточки в рабочем дереве даёт наряд с путём дерева", async () => {
@@ -143,8 +148,8 @@ await check("переход карточки в рабочем дереве да
 await check("свежая копия из рабочего дерева побеждает копию основного чекаута", async () => {
   const board = makeBoard();
   const tree = makeWorktree(board, "039");
-  writeCard(board, "040", "in-progress", { updated: T1 });
-  writeCard(tree, "040", "in-review", { updated: T2 });
+  writeCard(board, "039", "in-progress", { updated: T1 });
+  writeCard(tree, "039", "in-review", { updated: T2 });
 
   const calls = [];
   const ctx = makeCtx(calls);
@@ -160,8 +165,8 @@ await check("свежая копия из рабочего дерева побе
 await check("старая копия из рабочего дерева проигрывает основному чекауту", async () => {
   const board = makeBoard();
   const tree = makeWorktree(board, "039");
-  writeCard(board, "041", "in-review", { updated: T3 });
-  writeCard(tree, "041", "testing", { updated: T1 });
+  writeCard(board, "039", "in-review", { updated: T3 });
+  writeCard(tree, "039", "testing", { updated: T1 });
 
   const calls = [];
   const ctx = makeCtx(calls);
@@ -176,8 +181,8 @@ await check("старая копия из рабочего дерева прои
 await check("при равном updated выигрывает копия из рабочего дерева", async () => {
   const board = makeBoard();
   const tree = makeWorktree(board, "039");
-  writeCard(board, "042", "in-review", { updated: T2 });
-  writeCard(tree, "042", "testing", { updated: T2 });
+  writeCard(board, "039", "in-review", { updated: T2 });
+  writeCard(tree, "039", "testing", { updated: T2 });
 
   const calls = [];
   const ctx = makeCtx(calls);
@@ -210,8 +215,8 @@ await check("новое рабочее дерево подхватывается
 await check("удалённое дерево не ломает обход и не даёт ложных нарядов", async () => {
   const board = makeBoard();
   const tree = makeWorktree(board, "039");
-  writeCard(board, "043", "in-progress", { updated: T1 });
-  writeCard(tree, "043", "in-progress", { updated: T1 });
+  writeCard(board, "039", "in-progress", { updated: T1 });
+  writeCard(tree, "039", "in-progress", { updated: T1 });
 
   const calls = [];
   const ctx = makeCtx(calls);
@@ -226,7 +231,7 @@ await check("удалённое дерево не ломает обход и н�
   assert.equal(calls.length, 0, `уборка дерева дала наряд: ${JSON.stringify(calls.map((c) => c.content[0].text))}`);
 
   // Сторож продолжает работать: переход в основном чекауте по-прежнему виден.
-  writeCard(board, "043", "in-review", { updated: T2 });
+  writeCard(board, "039", "in-review", { updated: T2 });
   assert.ok(await waitFor(() => calls.length > 0), "основной чекаут перестал объявлять переходы");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
@@ -259,15 +264,15 @@ await check("битые и пустые каталоги в worktrees/ не ло
 await check("наряд по версии карточки не повторяется после перезапуска", async () => {
   const board = makeBoard();
   const tree = makeWorktree(board, "039");
-  writeCard(board, "046", "in-review", { updated: T2 });
-  writeCard(tree, "046", "in-review", { updated: T2 });
+  writeCard(board, "039", "in-review", { updated: T2 });
+  writeCard(tree, "039", "in-review", { updated: T2 });
 
   const calls = [];
   const first = makeCtx(calls);
   apply(first, config(board, { catchUpMs: 20 }));
   assert.ok(await waitFor(() => calls.length > 0), "наряд не отправлен");
   assert.ok(
-    await waitFor(() => stateKeys(board).some((key) => key.startsWith("046:in-review:"))),
+    await waitFor(() => stateKeys(board).some((key) => key.startsWith("039:in-review:"))),
     "в файле состояния нет ключа версии карточки",
   );
   first.pick("dispose")();
@@ -315,6 +320,85 @@ await check("переход в основном чекауте по-прежне
   assert.equal(calls[0].sessionId, "sess-reviewer");
   // Основная копия — без рабочего дерева: приписки про дерево в тексте быть не должно.
   assert.ok(!calls[0].content[0].text.includes("работай там"), "наряд из основного чекаута зовёт в дерево");
+  ctx.pick("dispose")();
+});
+
+await check("наряд о слиянии не зовёт в рабочее дерево", async () => {
+  const board = makeBoard();
+  const tree = makeWorktree(board, "053");
+  writeCard(board, "053", "in-progress", { updated: T1 });
+  writeCard(tree, "053", "testing", { updated: T2, worktree: tree });
+  silenceRefill(board);
+
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, { ...config(board, { catchUpMs: 5000 }), roles: { ...ROLES, dispatcher: "sess-dispatch" } });
+  await sleep(150);
+  writeCard(tree, "053", "ready", { updated: T3, worktree: tree });
+  assert.ok(await waitFor(() => calls.length > 0), "наряд о слиянии не отправлен");
+  await sleep(200);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  assert.equal(calls[0].sessionId, "sess-dispatch");
+  const text = calls[0].content[0].text;
+  assert.ok(text.includes("bin/task-commit.sh 053"), `в наряде нет команды слияния: ${text}`);
+  // `bin/task-commit.sh` из рабочего дерева задачи отказывается работать.
+  assert.ok(!text.includes("работай там"), `наряд о слиянии зовёт в дерево: ${text}`);
+  assert.ok(!text.includes("worktrees/053"), `наряд о слиянии упоминает дерево: ${text}`);
+  ctx.pick("dispose")();
+});
+
+await check("унаследованная копия чужой карточки не приписывает чужое дерево", async () => {
+  const board = makeBoard();
+  const tree = makeWorktree(board, "039");
+  // Дерево ветвится от main: в нём лежат копии всех карточек, но живая карточка
+  // задачи — только одноимённая (039.md). Чужие копии — эхо основной ветки.
+  writeCard(board, "042", "in-review", { updated: T2 });
+  writeCard(tree, "042", "in-review", { updated: T2 });
+
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, config(board, { catchUpMs: 20 }));
+  assert.ok(await waitFor(() => calls.length > 0), "карточка основного чекаута не объявлена");
+  await sleep(200);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  const text = calls[0].content[0].text;
+  assert.ok(!text.includes("работай там"), `наряд по #042 зовёт в чужое дерево: ${text}`);
+  assert.ok(!text.includes("worktrees/039"), `наряд по #042 упоминает чужое дерево: ${text}`);
+
+  // Даже более свежая копия чужой карточки в дереве не считается живой: правило
+  // то же, что в клиентской половине — из дерева берётся только одноимённая.
+  writeCard(tree, "042", "testing", { updated: T3 });
+  await sleep(300);
+  assert.equal(calls.length, 1, `унаследованная копия дала наряд: ${calls.length}`);
+  ctx.pick("dispose")();
+});
+
+await check("файл с чужим id внутри дерева не приписывает карточку", async () => {
+  const board = makeBoard();
+  const tree = makeWorktree(board, "039");
+  writeCard(board, "042", "in-review", { updated: T2 });
+  // Файл назван по дереву, но внутри чужая карточка: испорченная копия не должна
+  // ни подменить карточку основного чекаута, ни приписать ей это дерево.
+  const impostor = [
+    "---",
+    'id: "042"',
+    "title: Задача 042",
+    "status: testing",
+    'owner: "sess-worker"',
+    `updated: "${T3}"`,
+    "---",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(tree, ".kanban", "tasks", "039.md"), impostor);
+
+  const calls = [];
+  const ctx = makeCtx(calls);
+  apply(ctx, config(board, { catchUpMs: 20 }));
+  assert.ok(await waitFor(() => calls.length > 0), "карточка основного чекаута не объявлена");
+  await sleep(200);
+  assert.equal(calls.length, 1, `нарядов ${calls.length}`);
+  assert.equal(calls[0].sessionId, "sess-reviewer", "испорченная копия подменила карточку");
+  assert.ok(!calls[0].content[0].text.includes("работай там"), "испорченная копия приписала чужое дерево");
   ctx.pick("dispose")();
 });
 
