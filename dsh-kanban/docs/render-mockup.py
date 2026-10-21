@@ -430,6 +430,15 @@ def build_board(styles, columns, theme, cards, header_width):
                                 radius=chip_h / 2, outline=composite(text, 0.18, card_bg), line=1)
                     canvas.text(right - chip_w / 2, ty + chip_h / 2 - 1,
                                 label, small_font, composite(text, 0.9, card_bg), anchor="mm")
+            else:
+                # Плагин в этом слоте показывает «не назначено» (ownerEmpty):
+                # подпись прижата вправо и приглушена — макет повторяет доску.
+                label = "не назначено"
+                right = x + body_pad + inner_w - card_pad[1]
+                label_w = measure(draw, label, small_font)
+                if label_w <= right - cursor:
+                    canvas.text(right - label_w, ty + 1, label, small_font,
+                                composite(text, 0.45, card_bg))
             ty += max(card_id_font.size / SCALE * LINE_FACTOR, small_font.size / SCALE * LINE_FACTOR + 4) + card_gap
 
             merged = card.get("status") == "merged"
