@@ -23,9 +23,10 @@
 ---
 id: "007"
 title: Короткое название задачи
-status: todo            # todo | in-progress | in-review | testing | ready | merged | blocked
+status: todo            # backlog | todo | in-progress | in-review | testing | ready | merged | blocked
 owner: ""               # id сессии, которая держит карточку ($DSH_SESSION_ID)
 role: ""                # worker | reviewer | verifier | dispatcher
+spec: ""                # ссылка на спецификацию: .kanban/specs/<NNN>.md
 tokens: ""              # сумма по всем ролям (считается автоматически)
 tokens_worker: ""       # снимок расхода сессии исполнителя на момент передачи
 since: ""               # с какого времени карточка у текущей роли
@@ -53,6 +54,12 @@ updated: 2026-01-01T12:00:00Z
 ```bash
 bin/task-move.sh 007 todo --owner <session-id исполнителя>
 ```
+
+Нарезанные заранее задачи лежат в `backlog` без владельца; выдача из бэклога —
+тот же асайн, только переход `backlog → todo` (без `--owner` он отвергается).
+Поток выдачи ведёт `bin/backlog-fill.sh`: если в `todo` меньше минимума
+(`minTodo` из `.kanban/board.json`), он берёт `backlog`-карточки по возрастанию id
+и закрепляет их за свободными исполнителями из `.kanban/.workers.json`.
 
 Исполнитель берёт только закреплённое за ним:
 
@@ -92,6 +99,9 @@ grep -lE "^owner: \"?$DSH_SESSION_ID\"?$" .kanban/tasks/*.md
 
 | Переход | Кто | Когда |
 |---|---|---|
+| `backlog` → `todo` | оркестратор | асайн: `--owner <id>`, задача уходит исполнителю с нарядом |
+| `todo` → `backlog` | оркестратор | возврат в очередь: задача ещё не выдана, владелец и роль снимаются |
+| `backlog` → `blocked` | оркестратор | задача упёрлась в вопрос ещё до выдачи |
 | `todo` → `in-progress` | исполнитель | взял задачу, вписал свой `owner` |
 | `in-progress` → `in-review` | исполнитель | работа закончена, тесты локально прошли, ветка закоммичена |
 | `in-review` → `in-progress` | ревьювер | есть замечания: пишет их в карточку и возвращает **её же** исполнителю; в `note` — что именно поправить |

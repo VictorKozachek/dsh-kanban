@@ -219,6 +219,7 @@ const card = parseCard(
     'owner: "session-abc"',
     'branch: "task/007"',
     'worktree: "/tmp/awg-t007"',
+    'spec: "001"',
     'note: "тесты 12/12"',
     "---",
     "",
@@ -231,6 +232,7 @@ assert.equal(card.title, "QR для нового клиента");
 assert.equal(card.status, "testing");
 assert.equal(card.owner, "session-abc");
 assert.equal(card.branch, "task/007");
+assert.equal(card.spec, "001", "ссылка на спецификацию читается из поля spec");
 assert.equal(card.note, "тесты 12/12");
 assert.equal(card.file, ".kanban/tasks/007.md");
 

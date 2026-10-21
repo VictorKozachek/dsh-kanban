@@ -256,6 +256,7 @@ window.__ModuleLoader__.load({
         status: normalizeStatus(data.status || data.state || statusFromBody(parsed.body)),
         owner: String(data.owner || data.assignee || data.agent || ""),
         role: String(data.role || data.actor || ""),
+        spec: String(data.spec || ""),
         tokens: String(data.tokens || ""),
         since: String(data.since || ""),
         usage: usageFrom(data),
@@ -597,6 +598,20 @@ window.__ModuleLoader__.load({
           )
         );
       }
+      if (card.spec) {
+        rows.push(
+          h(
+            "div",
+            { key: "spec", style: styles.detailsRow, "data-kanban-spec": card.spec },
+            h("span", { style: styles.detailsLabel }, t("spec") + ":"),
+            h(
+              "span",
+              { title: ".kanban/specs/" + card.spec + ".md" },
+              ".kanban/specs/" + card.spec + ".md"
+            )
+          )
+        );
+      }
 
       const comments = Array.isArray(card.comments) ? card.comments : [];
       const commentNodes = comments.length
@@ -861,6 +876,7 @@ window.__ModuleLoader__.load({
       inBranch: "в ветке",
       tokens: "токенов",
       since: "с",
+      spec: "Спека",
       details: "Детали задачи",
       description: "Описание",
       comments: "Комментарии",
@@ -901,6 +917,7 @@ window.__ModuleLoader__.load({
       session: "Session",
       close: "Close",
       since: "since",
+      spec: "Spec",
       "role.worker": "executor",
       "role.reviewer": "reviewer",
       "role.verifier": "tester",

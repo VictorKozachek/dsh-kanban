@@ -15,11 +15,14 @@
 # В основной чекаут карточка попадает слиянием ветки.
 #
 # Использование:
-#   bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree] [--backlog]
+#   bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree] [--backlog] [--spec NNN]
 #
 # --backlog — завести карточку сразу со `status: backlog` и пустым `owner`: это
 # лог нарезанных заранее задач. Из backlog задачу выдают в todo асайном:
 # bin/task-move.sh <id> todo --owner <session-id>.
+#
+# --spec NNN — ссылка на спецификацию `.kanban/specs/NNN.md` (поле `spec`): по ней
+# видно, из какой нарезки задача. Спека должна существовать (bin/spec-new.sh).
 #
 set -euo pipefail
 
@@ -28,12 +31,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 usage() {
   cat <<'EOF'
 Использование:
-  bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree] [--backlog]
+  bin/task-new.sh "Название задачи" [--owner ID] [--no-worktree] [--backlog] [--spec NNN]
 
   --owner ID     сразу закрепить карточку за сессией (выдача в todo)
   --no-worktree  только карточка в текущей директории, без рабочего дерева
   --backlog      карточка сразу в backlog: status: backlog, owner пустой
                  (выдача из backlog — bin/task-move.sh <id> todo --owner <session-id>)
+  --spec NNN     ссылка на спецификацию .kanban/specs/NNN.md (поле spec)
 
 Задача с рабочим деревом: worktree worktrees/<id>, ветка task/<id>, карточка
 внутри ветки. Подробности — в комментарии в начале файла и в KANBAN.md.
@@ -42,6 +46,7 @@ EOF
 
 TITLE=""
 OWNER=""
+SPEC=""
 WITH_WORKTREE=1
 BACKLOG=0
 
@@ -51,6 +56,8 @@ while [[ $# -gt 0 ]]; do
     --backlog) BACKLOG=1; shift ;;
     --owner) OWNER="${2:?--owner требует значения}"; shift 2 ;;
     --owner=*) OWNER="${1#*=}"; shift ;;
+    --spec) SPEC="${2:?--spec требует значения}"; shift 2 ;;
+    --spec=*) SPEC="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
     *)
@@ -71,6 +78,20 @@ fi
 if (( BACKLOG == 1 )) && [[ -n "$OWNER" ]]; then
   echo "--backlog не сочетается с --owner: асайн — это переход backlog → todo --owner <id>" >&2
   exit 2
+fi
+
+# Спецификация: номер числовой и файл должен существовать — иначе карточка
+# ссылается в пустоту и нарезку не найти.
+if [[ -n "$SPEC" ]]; then
+  if [[ ! "$SPEC" =~ ^[0-9]+$ ]]; then
+    echo "--spec: ожидается номер спецификации, например 001 (получено: $SPEC)" >&2
+    exit 2
+  fi
+  SPEC="$(printf '%03d' "$((10#$SPEC))")"
+  if [[ ! -f "$ROOT/.kanban/specs/$SPEC.md" ]]; then
+    echo "--spec $SPEC: нет файла .kanban/specs/$SPEC.md — заведите спеку bin/spec-new.sh" >&2
+    exit 2
+  fi
 fi
 
 is_git() { git -C "$ROOT" rev-parse --show-toplevel >/dev/null 2>&1; }
@@ -112,6 +133,7 @@ write_card() {
       if [[ -n "$OWNER" ]]; then printf 'owner: "%s"\n' "$OWNER"; else printf 'owner: ""\n'; fi
     fi
     printf 'role: ""\n'
+    if [[ -n "$SPEC" ]]; then printf 'spec: "%s"\n' "$SPEC"; else printf 'spec: ""\n'; fi
     printf 'tokens: ""\n'
     printf 'since: ""\n'
     if [[ -n "$br" ]]; then printf 'branch: "%s"\n' "$br"; else printf 'branch: ""\n'; fi

@@ -31,7 +31,8 @@ make_repo() {
     echo "app" > app.txt &&
     printf 'worktrees/\n' > .gitignore &&
     cp -p "$ROOT/bin/task-new.sh" "$ROOT/bin/task-move.sh" "$ROOT/bin/board-sync.sh" \
-    "$ROOT/bin/task-commit.sh" "$ROOT/bin/task-usage.sh" bin/ &&
+    "$ROOT/bin/task-commit.sh" "$ROOT/bin/task-usage.sh" \
+    "$ROOT/bin/backlog-fill.sh" "$ROOT/bin/spec-new.sh" bin/ &&
     git add . &&
     git commit -qm init )
 }
@@ -200,6 +201,165 @@ if ( cd "$backlog_repo" && ./bin/task-move.sh 001 backlog >/dev/null 2>&1 ) &&
 else
   fail "возврат в очередь: $(grep -E '^(status|owner):' "$backlog_card")"
 fi
+
+echo "== спецификации: сквозной номер и поле spec в карточке"
+spec_repo="$WORK/spec"
+make_repo "$spec_repo"
+if ( cd "$spec_repo" && ./bin/spec-new.sh "Первая спека" >"$WORK/spec1" 2>&1 ) &&
+   [[ -f "$spec_repo/.kanban/specs/001.md" ]] &&
+   grep -q '^# Спека 001:' "$spec_repo/.kanban/specs/001.md" &&
+   grep -q '^Статус:' "$spec_repo/.kanban/specs/001.md" &&
+   grep -q '^## Зачем' "$spec_repo/.kanban/specs/001.md" &&
+   grep -q '^## Требования' "$spec_repo/.kanban/specs/001.md" &&
+   grep -q '^## Вне скоупа' "$spec_repo/.kanban/specs/001.md"; then
+  pass "spec-new.sh заводит первый файл по шаблону"
+else
+  fail "spec-new.sh: $(cat "$WORK/spec1" 2>/dev/null)"
+fi
+if ( cd "$spec_repo" && ./bin/spec-new.sh "Вторая спека" >/dev/null 2>&1 ) &&
+   [[ -f "$spec_repo/.kanban/specs/002.md" ]]; then
+  pass "spec-new.sh берёт следующий свободный номер"
+else
+  fail "второй номер: $(ls "$spec_repo/.kanban/specs" 2>/dev/null)"
+fi
+if ( cd "$spec_repo" && ./bin/task-new.sh "Задача из спеки" --no-worktree --spec 001 >/dev/null 2>&1 ) &&
+   grep -q '^spec: "001"' "$spec_repo/.kanban/tasks/001.md"; then
+  pass "task-new.sh --spec пишет поле spec"
+else
+  fail "spec в карточке: $(grep '^spec:' "$spec_repo/.kanban/tasks/001.md" 2>/dev/null)"
+fi
+if ( cd "$spec_repo" && ./bin/task-new.sh "Без спеки" --no-worktree >/dev/null 2>&1 ) &&
+   grep -q '^spec: ""' "$spec_repo/.kanban/tasks/002.md"; then
+  pass "без --spec поле spec пустое"
+else
+  fail "пустой spec: $(grep '^spec:' "$spec_repo/.kanban/tasks/002.md" 2>/dev/null)"
+fi
+if ( cd "$spec_repo" && ./bin/task-new.sh "Плохая ссылка" --no-worktree --spec 099 >"$WORK/spec2" 2>&1 ); then
+  fail "task-new.sh --spec на несуществующую спеку должен отвергаться"
+else
+  pass "task-new.sh --spec на несуществующую спеку отвергается"
+fi
+
+echo "== выдача из бэклога: минимум todo, FIFO по id, пул исполнителей"
+fill_repo="$WORK/fill"
+make_repo "$fill_repo"
+( cd "$fill_repo" && ./bin/task-new.sh "А" --backlog --no-worktree >/dev/null 2>&1 &&
+  ./bin/task-new.sh "Б" --backlog --no-worktree >/dev/null 2>&1 &&
+  ./bin/task-new.sh "В" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$fill_repo/.kanban"
+printf '{\n  "minTodo": 2\n}\n' > "$fill_repo/.kanban/board.json"
+printf '[\n  "sess-a",\n  "sess-b"\n]\n' > "$fill_repo/.kanban/.workers.json"
+
+before="$( cd "$fill_repo" && git status --porcelain .kanban/tasks )"
+if ( cd "$fill_repo" && ./bin/backlog-fill.sh --dry-run >"$WORK/fill1" 2>&1 ); then
+  if grep -q "#001 → sess-a" "$WORK/fill1" && grep -q "#002 → sess-b" "$WORK/fill1"; then
+    pass "--dry-run показывает план выдачи по FIFO"
+  else
+    fail "план dry-run: $(cat "$WORK/fill1")"
+  fi
+else
+  fail "dry-run упал: $(cat "$WORK/fill1")"
+fi
+after="$( cd "$fill_repo" && git status --porcelain .kanban/tasks )"
+if [[ "$before" == "$after" ]]; then
+  pass "--dry-run не меняет файлы"
+else
+  fail "--dry-run изменил доску: $after"
+fi
+
+if ( cd "$fill_repo" && ./bin/backlog-fill.sh >"$WORK/fill2" 2>&1 ); then
+  pass "backlog-fill выдаёт задачи при недоборе"
+else
+  fail "backlog-fill: $(cat "$WORK/fill2")"
+fi
+if grep -q '^status: todo' "$fill_repo/.kanban/tasks/001.md" && grep -q '^owner: sess-a' "$fill_repo/.kanban/tasks/001.md" &&
+   grep -q '^status: todo' "$fill_repo/.kanban/tasks/002.md" && grep -q '^owner: sess-b' "$fill_repo/.kanban/tasks/002.md" &&
+   grep -q '^status: backlog' "$fill_repo/.kanban/tasks/003.md"; then
+  pass "первая карточка ушла первому свободному, вторая — следующему"
+else
+  fail "выдача: $(grep -H -E '^(status|owner):' "$fill_repo"/.kanban/tasks/*.md | tr '\n' ' ')"
+fi
+if ( cd "$fill_repo" && ./bin/backlog-fill.sh >"$WORK/fill3" 2>&1 ) && grep -q "пополнять нечего" "$WORK/fill3"; then
+  pass "повторный запуск при полном todo ничего не меняет"
+else
+  fail "повторный запуск: $(cat "$WORK/fill3" 2>/dev/null)"
+fi
+( cd "$fill_repo" && ./bin/task-move.sh 001 in-progress --owner sess-a >/dev/null 2>&1 )
+if ( cd "$fill_repo" && ./bin/backlog-fill.sh >"$WORK/fill4" 2>&1 ) &&
+   grep -q '^status: todo' "$fill_repo/.kanban/tasks/003.md" &&
+   grep -q '^owner: sess-b' "$fill_repo/.kanban/tasks/003.md"; then
+  pass "занятой сессии задача не выдаётся"
+else
+  fail "выдача занятому: $(cat "$WORK/fill4" 2>/dev/null)"
+fi
+
+echo "== backlog-fill: отказы и fallback пула исполнителей"
+edge_repo="$WORK/fill-edge"
+make_repo "$edge_repo"
+( cd "$edge_repo" && ./bin/task-new.sh "Занят 1" --no-worktree --owner sess-a >/dev/null 2>&1 &&
+  ./bin/task-new.sh "Занят 2" --no-worktree --owner sess-b >/dev/null 2>&1 &&
+  ./bin/task-new.sh "Ждёт" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$edge_repo/.kanban"
+printf '{"minTodo": 2}\n' > "$edge_repo/.kanban/board.json"
+printf '["sess-a","sess-b"]\n' > "$edge_repo/.kanban/.workers.json"
+( cd "$edge_repo" && ./bin/task-move.sh 001 in-progress --owner sess-a >/dev/null 2>&1 &&
+  ./bin/task-move.sh 002 in-progress --owner sess-b >/dev/null 2>&1 )
+fill_code=0
+( cd "$edge_repo" && ./bin/backlog-fill.sh >"$WORK/fill5" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "3" ]] && grep -q "нет свободных исполнителей" "$WORK/fill5"; then
+  pass "нет свободных исполнителей — код 3 и объяснение"
+else
+  fail "нет свободных: код $fill_code, $(cat "$WORK/fill5" 2>/dev/null)"
+fi
+printf '{"minTodo": }\n' > "$edge_repo/.kanban/board.json"
+fill_code=0
+( cd "$edge_repo" && ./bin/backlog-fill.sh >"$WORK/fill6" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "1" ]] && grep -q "minTodo" "$WORK/fill6"; then
+  pass "битый board.json — код 1 и объяснение"
+else
+  fail "битый конфиг: код $fill_code, $(cat "$WORK/fill6" 2>/dev/null)"
+fi
+
+empty_repo="$WORK/fill-empty"
+make_repo "$empty_repo"
+mkdir -p "$empty_repo/.kanban/tasks"
+printf '{"minTodo": 2}\n' > "$empty_repo/.kanban/board.json"
+fill_code=0
+( cd "$empty_repo" && ./bin/backlog-fill.sh >"$WORK/fill7" 2>&1 ) || fill_code=$?
+if [[ "$fill_code" == "3" ]] && grep -q "backlog пуст" "$WORK/fill7"; then
+  pass "backlog пуст при недоборе — код 3"
+else
+  fail "пустой backlog: код $fill_code, $(cat "$WORK/fill7" 2>/dev/null)"
+fi
+
+fallback_repo="$WORK/fill-fallback"
+make_repo "$fallback_repo"
+( cd "$fallback_repo" && ./bin/task-new.sh "Из бэклога" --backlog --no-worktree >/dev/null 2>&1 )
+mkdir -p "$fallback_repo/.kanban"
+printf '{"minTodo": 1}\n' > "$fallback_repo/.kanban/board.json"
+printf '{"worker":"sess-z","reviewer":"sess-r"}\n' > "$fallback_repo/.kanban/.watcher-roles.json"
+if ( cd "$fallback_repo" && ./bin/backlog-fill.sh >"$WORK/fill8" 2>&1 ) &&
+   grep -q '^owner: sess-z' "$fallback_repo/.kanban/tasks/001.md"; then
+  pass "без .workers.json пул берётся из .watcher-roles.json"
+else
+  fail "fallback пула: $(cat "$WORK/fill8" 2>/dev/null)"
+fi
+
+echo "== .gitignore закрывает служебные файлы доски"
+for path in .kanban/.watcher-state.json .kanban/.watcher-roles.json .kanban/.watcher-pending.json .kanban/.workers.json .kanban/worktrees.json worktrees/007; do
+  if git -C "$ROOT" check-ignore -q "$path"; then
+    pass "служебный путь игнорируется: $path"
+  else
+    fail "не игнорируется: $path"
+  fi
+done
+for path in .kanban/board.json .kanban/specs/001-backlog.md .kanban/tasks/README.md; do
+  if git -C "$ROOT" check-ignore -q "$path"; then
+    fail "в .gitignore лишнее: $path"
+  else
+    pass "рабочий путь виден git: $path"
+  fi
+done
 
 echo "== коммит задачи: правило сообщения, ключ трекера, закрытый ready → merged"
 commit_repo="$WORK/commit"

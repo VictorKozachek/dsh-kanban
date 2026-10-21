@@ -315,6 +315,7 @@ const detailCard = plugin.__internals.parseCard(
     "status: in-review",
     "owner: session-abcdefghijkl",
     "role: reviewer",
+    'spec: "001"',
     'tokens: "6000"',
     'tokens_reviewer: "6000"',
     "---",
@@ -345,6 +346,9 @@ assert.ok(detailsText.includes("ревью без замечаний"), "в па
 assert.ok(detailsText.includes("2026-10-15T10:00:00Z"), "у комментария должна быть дата");
 assert.ok(detailsText.includes("in-progress"), "у комментария должен быть статус");
 assert.ok(detailsText.includes("tokens"), "в панели должен быть расход: " + detailsText);
+// Поле spec в карточке: ссылка на спецификацию видна в панели деталей.
+assert.deepEqual(collectAttrs(detailsTree, "data-kanban-spec"), ["001"], "панель должна показывать поле spec");
+assert.ok(detailsText.includes(".kanban/specs/001.md"), "в панели должна быть ссылка на спеку: " + detailsText);
 assert.equal(collectAttrs(detailsTree, "data-kanban-comment").length, 2, "должны быть оба комментария");
 assert.deepEqual(
   collectAttrs(detailsTree, "data-kanban-comment"),
