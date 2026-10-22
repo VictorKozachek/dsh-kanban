@@ -35,6 +35,13 @@
  *   roles: { reviewer, verifier, dispatcher } — id сессий ролей
  * Без `boards` сторож выключен, без `roles` будит только владельцев карточек.
  *
+ * Кроме сторожа, здесь поднимается командный канал клиент→хост
+ * (`./card-actions.js`): GUI может попросить асайн карточки из `backlog` или
+ * возврат в `backlog` из `todo`, а хост валидирует запрос и запускает
+ * `bin/task-assign.sh` в корне доски. Канал — обычный Typert Remote в режиме
+ * SRC: служба `kanbanCardActions` с методами `assign`/`unassign`. Подробности,
+ * обоснование выбора канала и wire-контракт — в шапке `card-actions.js`.
+ *
  * Браузерная половина (`./client`) от этой не зависят, поэтому вся обвязка
  * обёрнута в try/catch: сломанный сторож не должен уронить загрузку плагина.
  */
@@ -50,10 +57,51 @@ import {
   planAssignmentNotices,
   planRefillNotice,
 } from "./backlog-notices.js";
+import {
+  NAMESPACE,
+  registerCardActionsService,
+  runAssignScript,
+  sessionCwdFromContext,
+} from "./card-actions.js";
 
 /** Сервис, которым GUI отправляет сообщение в сессию. */
 export const inject = ["sessionController"];
 apply.inject = inject;
+
+/**
+ * Самопроверка командного канала: видит ли Gateway объявленные endpoint'ы.
+ *
+ * Запускается НЕ синхронно в `apply`: в момент загрузки плагина gateway может
+ * быть ещё не смонтирован, и `claimsEndpoint` вернул бы false — в логе появился
+ * бы ложный warn «не объявил», хотя канал работает. Поэтому проба идёт после
+ * стартовой паузы (`catchUpMs`, как у стартового обхода сторожа), а сообщения
+ * различают три состояния: «не проверено» (gateway не готов или не умеет
+ * проверку), «endpoint не объявлен» и «видит endpoint».
+ *
+ * @param ctx - контекст плагина.
+ */
+function probeCardChannel(ctx) {
+  const gateway = ctx.get?.("typertGateway");
+  if (!gateway) {
+    log(ctx, "warn", "канал асайна: не проверено — gateway ещё не готов (typertGateway не смонтирован)");
+    return;
+  }
+  if (typeof gateway.claimsEndpoint !== "function") {
+    log(ctx, "info", "канал асайна: не проверено — gateway не отдаёт claimsEndpoint");
+    return;
+  }
+  let claimed = false;
+  try {
+    claimed = gateway.claimsEndpoint(`${NAMESPACE}/assign`) === true;
+  } catch (error) {
+    claimed = false;
+  }
+  if (claimed) {
+    log(ctx, "info", `канал асайна: Gateway видит endpoint ${NAMESPACE}/assign`);
+  } else {
+    log(ctx, "warn", `канал асайна: gateway не объявил endpoint ${NAMESPACE}/assign — проверьте Typert-маркеры`);
+  }
+}
 
 /** Пауза после события файловой системы: карточка пишется одним коммитом. */
 const DEBOUNCE_MS = 400;
@@ -354,11 +402,41 @@ export function apply(ctx, config = {}) {
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+
+    // Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo →
+    // backlog` из GUI. Регистрируется даже без сторожевых `boards`: без них
+    // канал просто отказывает «сессия не привязана к доске», и это понятнее
+    // ошибки «endpoint не найден» на стороне клиента.
+    try {
+      registerCardActionsService(ctx, {
+        boards,
+        snapshot: readSnapshot,
+        resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),
+        runScript: runAssignScript,
+        log: (level, message) => log(ctx, level, message),
+      });
+    } catch (error) {
+      log(ctx, "warn", `канал асайна не поднялся: ${error?.message ?? error}`);
+    }
+
     // Эффективная карта ролей: ручные id из строки плагина главнее автокарты.
     const roles = { ...configuredRoles };
     // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
     const debounceMs = Number.isFinite(config?.debounceMs) ? Number(config.debounceMs) : DEBOUNCE_MS;
     const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
+
+    // Самопроверка канала — после стартовой паузы, когда gateway уже смонтирован
+    // (синхронная проба в apply давала ложный «не объявил»). Таймер снимаем по
+    // dispose, чтобы он не выстрелил после выгрузки плагина.
+    const channelProbe = setTimeout(() => {
+      try {
+        probeCardChannel(ctx);
+      } catch (error) {
+        log(ctx, "warn", `канал асайна: самопроверка упала: ${error?.message ?? error}`);
+      }
+    }, catchUpMs);
+    ctx.on?.("dispose", () => clearTimeout(channelProbe));
+
     if (boards.length === 0) {
       log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards");
       return;
