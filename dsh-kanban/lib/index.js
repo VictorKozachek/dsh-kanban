@@ -78,12 +78,18 @@ apply.inject = inject;
  * различают три состояния: «не проверено» (gateway не готов или не умеет
  * проверку), «endpoint не объявлен» и «видит endpoint».
  *
+ * Уровни нарочно разные: «не проверено» — это `info` (нормальный ход событий, а
+ * не поломка: оркестратор не должен принимать его за сбой), `warn` остаётся
+ * только для настоящего «endpoint не объявлен».
+ *
  * @param ctx - контекст плагина.
  */
 function probeCardChannel(ctx) {
   const gateway = ctx.get?.("typertGateway");
   if (!gateway) {
-    log(ctx, "warn", "канал асайна: не проверено — gateway ещё не готов (typertGateway не смонтирован)");
+    // `info`, а не `warn`: gateway может смонтироваться после пробы — это штатный
+    // ход старта, и пугать оркестратора поломкой не нужно.
+    log(ctx, "info", "канал асайна: не проверено — gateway ещё не готов (typertGateway не смонтирован)");
     return;
   }
   if (typeof gateway.claimsEndpoint !== "function") {
