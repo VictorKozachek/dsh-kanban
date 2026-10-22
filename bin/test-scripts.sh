@@ -410,9 +410,9 @@ fi
 
 echo "== backlog-fill: занятость исполнителя в рабочих деревьях"
 # Карточка для стенда: критерий занятости — статус и owner, остальное не важно.
-write_card() { # файл id статус владелец [updated]
-  printf -- '---\nid: "%s"\ntitle: Задача %s\nstatus: %s\nowner: "%s"\nupdated: "%s"\n---\n' \
-    "$2" "$2" "$3" "$4" "${5:-2026-10-21T10:00:00Z}" > "$1"
+write_card() { # файл id статус владелец [updated] [role]
+  printf -- '---\nid: "%s"\ntitle: Задача %s\nstatus: %s\nowner: "%s"\nrole: "%s"\nupdated: "%s"\n---\n' \
+    "$2" "$2" "$3" "$4" "${6:-}" "${5:-2026-10-21T10:00:00Z}" > "$1"
 }
 
 # Кто записан во владельцах карточки: task-move пишет простое значение без кавычек.
@@ -695,6 +695,35 @@ else
   fail "все заняты: код $assign_code, $(cat "$WORK/assign4" 2>/dev/null)"
 fi
 
+# Пустой пул (нет ни .workers.json, ни .watcher-roles.json) — код 4 с подсказкой,
+# даже когда в доске есть владельцы карточек: асайн не должен уходить им, а
+# проверка занятости не должна молча отключаться.
+emptypool_repo="$WORK/assign-emptypool"
+make_repo "$emptypool_repo"
+mkdir -p "$emptypool_repo/.kanban/tasks"
+write_card "$emptypool_repo/.kanban/tasks/001.md" 001 in-progress w1
+write_card "$emptypool_repo/.kanban/tasks/010.md" 010 backlog ""
+pool_before="$(cksum "$emptypool_repo/.kanban/tasks/010.md")"
+assign_code=0
+( cd "$emptypool_repo" && ./bin/task-assign.sh 010 >"$WORK/assign14" 2>&1 ) || assign_code=$?
+pool_after="$(cksum "$emptypool_repo/.kanban/tasks/010.md")"
+if [[ "$assign_code" == "4" ]] && [[ "$pool_before" == "$pool_after" ]] &&
+   grep -q "пул исполнителей пуст" "$WORK/assign14"; then
+  pass "пустой пул — код 4, карточка не меняется"
+else
+  fail "пустой пул: код $assign_code, $(cat "$WORK/assign14" 2>/dev/null)"
+fi
+# Тот же случай, когда пул есть, но пустой: `.workers.json` = [].
+printf '[]\n' > "$emptypool_repo/.kanban/.workers.json"
+assign_code=0
+( cd "$emptypool_repo" && ./bin/task-assign.sh 010 >"$WORK/assign15" 2>&1 ) || assign_code=$?
+if [[ "$assign_code" == "4" ]] && grep -q "пул исполнителей пуст" "$WORK/assign15" &&
+   [[ "$(written_owner "$emptypool_repo/.kanban/tasks/010.md")" == "" ]]; then
+  pass "пустой .workers.json = [] — код 4, асайна занятому нет"
+else
+  fail "пустой []: код $assign_code, $(cat "$WORK/assign15" 2>/dev/null)"
+fi
+
 # Карточка в рабочем дереве: асайн и коммит уходят в ветку задачи, main не тронут.
 tree_assign_repo="$WORK/assign-tree"
 make_repo "$tree_assign_repo"
@@ -720,7 +749,7 @@ unassign_repo="$WORK/assign-unassign"
 make_repo "$unassign_repo"
 mkdir -p "$unassign_repo/.kanban/tasks"
 printf '["w1"]\n' > "$unassign_repo/.kanban/.workers.json"
-write_card "$unassign_repo/.kanban/tasks/040.md" 040 todo w1 worker
+write_card "$unassign_repo/.kanban/tasks/040.md" 040 todo w1 "" worker
 assign_code=0
 ( cd "$unassign_repo" && ./bin/task-assign.sh 040 --unassign >"$WORK/assign6" 2>&1 ) || assign_code=$?
 un_status="$(written_field "$unassign_repo/.kanban/tasks/040.md" status)"
@@ -734,7 +763,7 @@ else
 fi
 
 # --unassign из in-progress — отказ, карточка не меняется.
-write_card "$unassign_repo/.kanban/tasks/041.md" 041 in-progress w1 worker
+write_card "$unassign_repo/.kanban/tasks/041.md" 041 in-progress w1 "" worker
 un_before="$(cksum "$unassign_repo/.kanban/tasks/041.md")"
 assign_code=0
 ( cd "$unassign_repo" && ./bin/task-assign.sh 041 --unassign >"$WORK/assign7" 2>&1 ) || assign_code=$?

@@ -300,13 +300,21 @@ build_loads() {
     esac
     printf '%s\t%s\n' "$owner" "$status" >> "$LOAD_ROWS_FILE"
   done < "$SNAPSHOT_FILE"
-  awk -F '\t' '
-    FNR == NR {
-      if ($1 == "" || seen[$1]++) next
-      order[++n] = $1
-      load[$1] = 0
-      busy[$1] = 0
-      next
+  # Пул передаём значением через окружение, а не вторым файлом: различать файлы
+  # по `FNR == NR` нельзя — при пустом пуле (нет обоих файлов или `[]`) первый же
+  # ряд строк нагрузки выглядел бы пулом, и проверка занятости отключалась.
+  KANBAN_ASSIGN_POOL="$(cat "$LOAD_POOL_FILE")" awk -F '\t' '
+    BEGIN {
+      pool = ENVIRON["KANBAN_ASSIGN_POOL"]
+      if (pool != "") {
+        n = split(pool, ids, "\n")
+        for (i = 1; i <= n; i++) {
+          if (ids[i] == "" || seen[ids[i]]++) continue
+          order[++total] = ids[i]
+          load[ids[i]] = 0
+          busy[ids[i]] = 0
+        }
+      }
     }
     {
       who = $1
@@ -315,9 +323,9 @@ build_loads() {
       load[who]++
     }
     END {
-      for (i = 1; i <= n; i++) printf "%s\t%d\t%d\n", order[i], load[order[i]], busy[order[i]]
+      for (i = 1; i <= total; i++) printf "%s\t%d\t%d\n", order[i], load[order[i]], busy[order[i]]
     }
-  ' "$LOAD_POOL_FILE" "$LOAD_ROWS_FILE" > "$LOADS_FILE"
+  ' "$LOAD_ROWS_FILE" > "$LOADS_FILE"
 }
 
 # Таблица нагрузок для плана: по строке на исполнителя.
@@ -394,6 +402,17 @@ if [[ "$status" != "backlog" ]]; then
 fi
 
 read_workers
+
+# Пустой пул — не «все заняты»: разбирать нагрузки не по кому, и асайн должен
+# отказать с подсказкой, а не искать кандидатов среди владельцев карточек.
+if (( ${#WORKERS[@]} == 0 )); then
+  echo "карточка: $label — $where"
+  echo "статус: backlog"
+  echo "нагрузки:"
+  echo "нет свободных: пул исполнителей пуст — заведите .kanban/.workers.json или worker в .kanban/.watcher-roles.json" >&2
+  exit 4
+fi
+
 build_loads
 
 chosen=""
@@ -412,11 +431,7 @@ echo "нагрузки:"
 print_loads
 
 if [[ -z "$chosen" ]]; then
-  if (( ${#WORKERS[@]} == 0 )); then
-    echo "нет свободных: пул исполнителей пуст — заведите .kanban/.workers.json или worker в .kanban/.watcher-roles.json" >&2
-  else
-    echo "все заняты: у каждого исполнителя есть карточка in-progress — асайн невозможен, карточка осталась в backlog" >&2
-  fi
+  echo "все заняты: у каждого исполнителя есть карточка in-progress — асайн невозможен, карточка осталась в backlog" >&2
   exit 4
 fi
 
