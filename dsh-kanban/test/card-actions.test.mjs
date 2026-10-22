@@ -562,6 +562,9 @@ function makeChannelContext({ sessionCwd, gateway } = {}) {
   const handlers = new Map();
   const logs = [];
   const push = (level, message) => logs.push(`${level}: ${message}`);
+  // Gateway может смонтироваться уже после `apply` — так и происходит на живом
+  // старте профиля. Поэтому держим его в изменяемом слоте, а не в замыкании.
+  const gatewayRef = { current: gateway };
   const ctx = {
     logger: () => ({
       info: (message) => push("info", message),
@@ -578,7 +581,7 @@ function makeChannelContext({ sessionCwd, gateway } = {}) {
       return async () => services.delete(name);
     },
     get: (name) => {
-      if (name === "typertGateway") return gateway;
+      if (name === "typertGateway") return gatewayRef.current;
       if (name === "sessionQuery") {
         return {
           observeSession: async (sessionId) => ({
@@ -591,7 +594,10 @@ function makeChannelContext({ sessionCwd, gateway } = {}) {
     },
     sessionController: { prompt: async () => ({ accepted: true }) },
   };
-  return { ctx, logs };
+  const mountGateway = (value) => {
+    gatewayRef.current = value;
+  };
+  return { ctx, logs, mountGateway };
 }
 
 await checkAsync("асайн карточки в рабочем дереве: todo/owner/role, коммит в ветке, main чист", async () => {
@@ -728,10 +734,11 @@ await checkAsync("gateway готов и видит endpoint — info «види�
   await sleep(40);
   ctx.pick("dispose")();
   assert.ok(
-    logs.some((line) => line.includes(`видит endpoint ${NAMESPACE}/assign`)),
-    `в логе нет подтверждения: ${logs.join(" | ")}`,
+    logs.some((line) => line.startsWith("info: ") && line.includes(`видит endpoint ${NAMESPACE}/assign`)),
+    `в логе нет info «видит endpoint»: ${logs.join(" | ")}`,
   );
   assert.ok(!logs.some((line) => line.includes("не объявил")), `ложный warn: ${logs.join(" | ")}`);
+  assert.ok(!logs.some((line) => line.startsWith("warn: ")), `в логе не должно быть warn: ${logs.join(" | ")}`);
 });
 
 await checkAsync("gateway готов, но endpoint не объявлен — честный warn", async () => {
@@ -739,7 +746,10 @@ await checkAsync("gateway готов, но endpoint не объявлен — ч
   apply(ctx, { boards: [], catchUpMs: 5 });
   await sleep(40);
   ctx.pick("dispose")();
-  assert.ok(logs.some((line) => line.includes("не объявил endpoint")), logs.join(" | "));
+  assert.ok(
+    logs.some((line) => line.startsWith("warn: ") && line.includes("не объявил endpoint")),
+    `«endpoint не объявлен» должен быть warn: ${logs.join(" | ")}`,
+  );
 });
 
 await checkAsync("gateway ещё не смонтирован — «не проверено», а не «не объявлен»", async () => {
@@ -747,7 +757,11 @@ await checkAsync("gateway ещё не смонтирован — «не пров
   apply(ctx, { boards: [], catchUpMs: 5 });
   await sleep(40);
   ctx.pick("dispose")();
-  assert.ok(logs.some((line) => line.includes("не проверено")), logs.join(" | "));
+  assert.ok(
+    logs.some((line) => line.startsWith("info: ") && line.includes("не проверено")),
+    `«не проверено» должен быть info: ${logs.join(" | ")}`,
+  );
+  assert.ok(!logs.some((line) => line.startsWith("warn: ")), `warn тут — ложная тревога: ${logs.join(" | ")}`);
   assert.ok(!logs.some((line) => line.includes("не объявил")), `ложный warn: ${logs.join(" | ")}`);
 });
 
@@ -756,8 +770,35 @@ await checkAsync("gateway без claimsEndpoint — «не проверено»"
   apply(ctx, { boards: [], catchUpMs: 5 });
   await sleep(40);
   ctx.pick("dispose")();
-  assert.ok(logs.some((line) => line.includes("не проверено")), logs.join(" | "));
-  assert.ok(!logs.some((line) => line.includes("не объявил")), `ложный warn: ${logs.join(" | ")}`);
+  assert.ok(
+    logs.some((line) => line.startsWith("info: ") && line.includes("не проверено")),
+    `«не проверено» должен быть info: ${logs.join(" | ")}`,
+  );
+  assert.ok(!logs.some((line) => line.startsWith("warn: ")), `warn тут — ложная тревога: ${logs.join(" | ")}`);
+});
+
+// Самый частый живой случай: `apply` выполняется до того, как gateway
+// смонтировался, а проба идёт по `catchUpMs` — к её срабатыванию gateway уже
+// на месте. Регрессия на то, что проба это видит и не пишет warn.
+await checkAsync("gateway смонтировался между apply и пробой — info «видит endpoint», без warn", async () => {
+  const { ctx, logs, mountGateway } = makeChannelContext({ sessionCwd: work, gateway: undefined });
+  let claims = 0;
+  apply(ctx, { boards: [], catchUpMs: 40 });
+  // Пауза пробы ещё не прошла — gateway появляется ровно в этом окне.
+  mountGateway({
+    claimsEndpoint: (endpoint) => {
+      claims += 1;
+      return endpoint === `${NAMESPACE}/assign`;
+    }
+  });
+  await sleep(90);
+  ctx.pick("dispose")();
+  assert.equal(claims, 1, "claimsEndpoint должен быть вызван ровно один раз");
+  assert.ok(
+    logs.some((line) => line.startsWith("info: ") && line.includes(`видит endpoint ${NAMESPACE}/assign`)),
+    `в логе нет info «видит endpoint»: ${logs.join(" | ")}`,
+  );
+  assert.ok(!logs.some((line) => line.startsWith("warn: ")), `в логе появился warn: ${logs.join(" | ")}`);
 });
 
 await checkAsync("dispose до пробы — таймер снят, лога о канале нет", async () => {
