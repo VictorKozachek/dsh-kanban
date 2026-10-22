@@ -9,10 +9,13 @@
  * Запуск: node dsh-kanban/test/card-actions.test.mjs
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { apply } from "../lib/index.js";
 import { snapshotCards } from "../lib/watcher-core.js";
 import {
   CARD_ID_PATTERN,
@@ -57,13 +60,14 @@ async function checkAsync(name, fn) {
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-card-actions-"));
 
-function cardText(id, status, owner = "") {
+function cardText(id, status, owner = "", role = "") {
   return [
     "---",
     `id: "${id}"`,
     `title: "Задача ${id}"`,
     `status: ${status}`,
     `owner: ${owner ? `"${owner}"` : '""'}`,
+    `role: ${role ? `"${role}"` : '""'}`,
     "---",
     "",
     "## Задача",
@@ -72,10 +76,10 @@ function cardText(id, status, owner = "") {
   ].join("\n");
 }
 
-function writeCard(root, id, status, owner = "") {
+function writeCard(root, id, status, owner = "", role = "") {
   const dir = path.join(root, ".kanban", "tasks");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${id}.md`), cardText(id, status, owner));
+  fs.writeFileSync(path.join(dir, `${id}.md`), cardText(id, status, owner, role));
 }
 
 function fileSnapshot(root) {
@@ -478,6 +482,294 @@ await checkAsync("неизвестная сессия — исключение, 
     }),
   };
   await assert.rejects(() => sessionCwdFromContext(ctx, "session-abc"), /session not found/);
+});
+
+// ── сквозная регрессия: настоящие bin/task-assign.sh и bin/task-move.sh ─────
+
+console.log("== настоящий bin/task-assign.sh: канал поверх реального скрипта");
+
+const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** Скопировать в временный репозиторий настоящие скрипты набора. */
+function copyRepoScripts(repoRoot) {
+  const from = path.join(pluginRoot, "bin");
+  const to = path.join(repoRoot, "bin");
+  fs.mkdirSync(to, { recursive: true });
+  for (const name of ["task-assign.sh", "task-move.sh", "task-usage.sh"]) {
+    fs.copyFileSync(path.join(from, name), path.join(to, name));
+    fs.chmodSync(path.join(to, name), 0o755);
+  }
+}
+
+function git(cwd, args) {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+/**
+ * Настоящий временный git-репозиторий с копией скриптов набора.
+ *
+ * `.gitignore` повторяет набор: служебные файлы доски не должны делать `git
+ * status` грязным, иначе проверка «main чист» была бы ложной.
+ */
+function makeGitRepo(name) {
+  const root = path.join(work, name);
+  fs.mkdirSync(root, { recursive: true });
+  copyRepoScripts(root);
+  fs.writeFileSync(
+    path.join(root, ".gitignore"),
+    [
+      "worktrees/",
+      "",
+      "# Служебные файлы доски — как в самом наборе.",
+      ".kanban/.watcher-state.json",
+      ".kanban/.watcher-roles.json",
+      ".kanban/.watcher-pending.json",
+      ".kanban/.workers.json",
+      "",
+    ].join("\n"),
+  );
+  fs.writeFileSync(path.join(root, "app.txt"), "app\n");
+  git(root, ["init", "-q", "-b", "main", "."]);
+  git(root, ["config", "user.email", "test@example.com"]);
+  git(root, ["config", "user.name", "test"]);
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-qm", "init"]);
+  return fs.realpathSync.native(root);
+}
+
+/** Поля front matter без парсера: в тесте нужны только status/owner/role. */
+function readFields(file) {
+  const text = fs.readFileSync(file, "utf8");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  const fields = {};
+  for (const line of (match?.[1] ?? "").split(/\r?\n/)) {
+    const cut = line.indexOf(":");
+    if (cut > 0) fields[line.slice(0, cut).trim()] = line.slice(cut + 1).trim().replace(/^"|"$/g, "");
+  }
+  return fields;
+}
+
+function sleep(ms) {
+  return new Promise((done) => setTimeout(done, ms));
+}
+
+/**
+ * Контекст как у плагина: `provide/get/on/logger` и службы, которыми живёт канал.
+ * `dispose` склеивает все обработчики — cordis зовёт их все, тест тоже.
+ */
+function makeChannelContext({ sessionCwd, gateway } = {}) {
+  const services = new Map();
+  const handlers = new Map();
+  const logs = [];
+  const push = (level, message) => logs.push(`${level}: ${message}`);
+  const ctx = {
+    logger: () => ({
+      info: (message) => push("info", message),
+      warn: (message) => push("warn", message),
+    }),
+    on: (name, handler) => {
+      const list = handlers.get(name) ?? [];
+      list.push(handler);
+      handlers.set(name, list);
+    },
+    pick: (name) => () => (handlers.get(name) ?? []).forEach((handler) => handler()),
+    provide: (name, value) => {
+      services.set(name, value);
+      return async () => services.delete(name);
+    },
+    get: (name) => {
+      if (name === "typertGateway") return gateway;
+      if (name === "sessionQuery") {
+        return {
+          observeSession: async (sessionId) => ({
+            header: { id: sessionId, cwd: sessionCwd },
+            [Symbol.dispose]: () => {},
+          }),
+        };
+      }
+      return services.get(name);
+    },
+    sessionController: { prompt: async () => ({ accepted: true }) },
+  };
+  return { ctx, logs };
+}
+
+await checkAsync("асайн карточки в рабочем дереве: todo/owner/role, коммит в ветке, main чист", async () => {
+  const repo = makeGitRepo("real-tree");
+  fs.mkdirSync(path.join(repo, ".kanban", "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".kanban", ".workers.json"), '["w1"]\n');
+  const tree = path.join(repo, "worktrees", "030");
+  git(repo, ["worktree", "add", "-q", "-b", "task/030", tree, "HEAD"]);
+  writeCard(tree, "030", "backlog");
+  const { ctx } = makeChannelContext({ sessionCwd: tree });
+  apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
+  try {
+    const service = ctx.get(SERVICE_KEY);
+    assert.ok(service, "служба канала не зарегистрирована в контексте");
+    const result = await service.assign({ sessionId: "session-abc", cardId: "030" });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.status, "todo");
+    assert.equal(result.owner, "w1");
+    const fields = readFields(path.join(tree, ".kanban", "tasks", "030.md"));
+    assert.equal(fields.status, "todo");
+    assert.equal(fields.owner, "w1");
+    assert.equal(fields.role, "worker");
+    assert.match(git(tree, ["log", "-1", "--format=%s"]), /kanban\(030\): todo/);
+    assert.equal(
+      fs.existsSync(path.join(repo, ".kanban", "tasks", "030.md")),
+      false,
+      "асайн не должен заводить копию карточки в основном чекауте",
+    );
+    assert.equal(git(repo, ["status", "--porcelain"]), "", "основной чекаут должен остаться чистым");
+  } finally {
+    ctx.pick("dispose")();
+  }
+});
+
+await checkAsync("повторный асайн — бизнес-отказ, карточка не двигается", async () => {
+  const repo = makeGitRepo("real-repeat");
+  writeCard(repo, "031", "todo", "w1", "worker");
+  const { ctx } = makeChannelContext({ sessionCwd: repo });
+  apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
+  try {
+    const before = fs.readFileSync(path.join(repo, ".kanban", "tasks", "031.md"), "utf8");
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "031" });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "todo");
+    assert.match(result.message, /только из backlog/);
+    assert.equal(fs.readFileSync(path.join(repo, ".kanban", "tasks", "031.md"), "utf8"), before);
+  } finally {
+    ctx.pick("dispose")();
+  }
+});
+
+await checkAsync("чужой статус (in-progress) — отказ, скрипт не меняет карточку", async () => {
+  const repo = makeGitRepo("real-progress");
+  writeCard(repo, "032", "in-progress", "w1", "worker");
+  const { ctx } = makeChannelContext({ sessionCwd: repo });
+  apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
+  try {
+    const before = fs.readFileSync(path.join(repo, ".kanban", "tasks", "032.md"), "utf8");
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "032" });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "in-progress");
+    assert.match(result.message, /только из backlog/);
+    assert.equal(fs.readFileSync(path.join(repo, ".kanban", "tasks", "032.md"), "utf8"), before);
+  } finally {
+    ctx.pick("dispose")();
+  }
+});
+
+await checkAsync("все заняты: настоящий скрипт даёт код 4, канал — ok:false и карточка в backlog", async () => {
+  const repo = makeGitRepo("real-busy");
+  writeCard(repo, "001", "in-progress", "w1", "worker");
+  writeCard(repo, "002", "in-progress", "w2", "worker");
+  writeCard(repo, "033", "backlog");
+  fs.writeFileSync(path.join(repo, ".kanban", ".workers.json"), '["w1","w2"]\n');
+  const { ctx } = makeChannelContext({ sessionCwd: repo });
+  apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
+  try {
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "033" });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "backlog");
+    assert.match(result.message, /все исполнители заняты/);
+    assert.equal(readFields(path.join(repo, ".kanban", "tasks", "033.md")).owner, "");
+  } finally {
+    ctx.pick("dispose")();
+  }
+});
+
+await checkAsync("нет bin/task-assign.sh — понятный отказ", async () => {
+  const repo = path.join(work, "real-no-script");
+  writeCard(repo, "034", "backlog");
+  const root = fs.realpathSync.native(repo);
+  const { ctx } = makeChannelContext({ sessionCwd: root });
+  apply(ctx, { boards: [root], catchUpMs: 5, debounceMs: 1 });
+  try {
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "034" });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /bin\/task-assign\.sh/);
+  } finally {
+    ctx.pick("dispose")();
+  }
+});
+
+await checkAsync("возврат в очередь настоящим скриптом: backlog, без владельца и роли, коммит", async () => {
+  const repo = makeGitRepo("real-unassign");
+  writeCard(repo, "035", "todo", "w1", "worker");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "kanban(035): todo"]);
+  const { ctx } = makeChannelContext({ sessionCwd: repo });
+  apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
+  try {
+    const result = await ctx.get(SERVICE_KEY).unassign({ sessionId: "session-abc", cardId: "035" });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.status, "backlog");
+    const fields = readFields(path.join(repo, ".kanban", "tasks", "035.md"));
+    assert.equal(fields.status, "backlog");
+    assert.equal(fields.owner, "");
+    assert.equal(fields.role, "");
+    assert.match(git(repo, ["log", "-1", "--format=%s"]), /kanban\(035\): backlog/);
+  } finally {
+    ctx.pick("dispose")();
+  }
+});
+
+// ── самопроверка канала при старте ───────────────────────────────────────────
+
+console.log("== самопроверка канала: после стартовой паузы, без ложного warn");
+
+await checkAsync("gateway готов и видит endpoint — info «видит endpoint», без warn", async () => {
+  const { ctx, logs } = makeChannelContext({
+    sessionCwd: work,
+    gateway: { claimsEndpoint: (endpoint) => endpoint === `${NAMESPACE}/assign` },
+  });
+  apply(ctx, { boards: [], catchUpMs: 5 });
+  await sleep(40);
+  ctx.pick("dispose")();
+  assert.ok(
+    logs.some((line) => line.includes(`видит endpoint ${NAMESPACE}/assign`)),
+    `в логе нет подтверждения: ${logs.join(" | ")}`,
+  );
+  assert.ok(!logs.some((line) => line.includes("не объявил")), `ложный warn: ${logs.join(" | ")}`);
+});
+
+await checkAsync("gateway готов, но endpoint не объявлен — честный warn", async () => {
+  const { ctx, logs } = makeChannelContext({ sessionCwd: work, gateway: { claimsEndpoint: () => false } });
+  apply(ctx, { boards: [], catchUpMs: 5 });
+  await sleep(40);
+  ctx.pick("dispose")();
+  assert.ok(logs.some((line) => line.includes("не объявил endpoint")), logs.join(" | "));
+});
+
+await checkAsync("gateway ещё не смонтирован — «не проверено», а не «не объявлен»", async () => {
+  const { ctx, logs } = makeChannelContext({ sessionCwd: work, gateway: undefined });
+  apply(ctx, { boards: [], catchUpMs: 5 });
+  await sleep(40);
+  ctx.pick("dispose")();
+  assert.ok(logs.some((line) => line.includes("не проверено")), logs.join(" | "));
+  assert.ok(!logs.some((line) => line.includes("не объявил")), `ложный warn: ${logs.join(" | ")}`);
+});
+
+await checkAsync("gateway без claimsEndpoint — «не проверено»", async () => {
+  const { ctx, logs } = makeChannelContext({ sessionCwd: work, gateway: {} });
+  apply(ctx, { boards: [], catchUpMs: 5 });
+  await sleep(40);
+  ctx.pick("dispose")();
+  assert.ok(logs.some((line) => line.includes("не проверено")), logs.join(" | "));
+  assert.ok(!logs.some((line) => line.includes("не объявил")), `ложный warn: ${logs.join(" | ")}`);
+});
+
+await checkAsync("dispose до пробы — таймер снят, лога о канале нет", async () => {
+  const { ctx, logs } = makeChannelContext({ sessionCwd: work, gateway: { claimsEndpoint: () => true } });
+  apply(ctx, { boards: [], catchUpMs: 60 });
+  ctx.pick("dispose")();
+  await sleep(120);
+  assert.deepEqual(
+    logs.filter((line) => line.includes("канал асайна")),
+    [],
+    `таймер выстрелил после dispose: ${logs.join(" | ")}`,
+  );
 });
 
 fs.rmSync(work, { recursive: true, force: true });

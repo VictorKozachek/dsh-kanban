@@ -68,6 +68,41 @@ import {
 export const inject = ["sessionController"];
 apply.inject = inject;
 
+/**
+ * Самопроверка командного канала: видит ли Gateway объявленные endpoint'ы.
+ *
+ * Запускается НЕ синхронно в `apply`: в момент загрузки плагина gateway может
+ * быть ещё не смонтирован, и `claimsEndpoint` вернул бы false — в логе появился
+ * бы ложный warn «не объявил», хотя канал работает. Поэтому проба идёт после
+ * стартовой паузы (`catchUpMs`, как у стартового обхода сторожа), а сообщения
+ * различают три состояния: «не проверено» (gateway не готов или не умеет
+ * проверку), «endpoint не объявлен» и «видит endpoint».
+ *
+ * @param ctx - контекст плагина.
+ */
+function probeCardChannel(ctx) {
+  const gateway = ctx.get?.("typertGateway");
+  if (!gateway) {
+    log(ctx, "warn", "канал асайна: не проверено — gateway ещё не готов (typertGateway не смонтирован)");
+    return;
+  }
+  if (typeof gateway.claimsEndpoint !== "function") {
+    log(ctx, "info", "канал асайна: не проверено — gateway не отдаёт claimsEndpoint");
+    return;
+  }
+  let claimed = false;
+  try {
+    claimed = gateway.claimsEndpoint(`${NAMESPACE}/assign`) === true;
+  } catch (error) {
+    claimed = false;
+  }
+  if (claimed) {
+    log(ctx, "info", `канал асайна: Gateway видит endpoint ${NAMESPACE}/assign`);
+  } else {
+    log(ctx, "warn", `канал асайна: gateway не объявил endpoint ${NAMESPACE}/assign — проверьте Typert-маркеры`);
+  }
+}
+
 /** Пауза после события файловой системы: карточка пишется одним коммитом. */
 const DEBOUNCE_MS = 400;
 
@@ -380,25 +415,6 @@ export function apply(ctx, config = {}) {
         runScript: runAssignScript,
         log: (level, message) => log(ctx, level, message),
       });
-      // Самопроверка: Gateway находит endpoint по Typert-маркерам в SRC-режиме.
-      // Если маркеры не прочитались (сменилась форма протокола), кнопки в GUI
-      // получат отказ — лучше сказать об этом в лог при старте, чем ловить молча.
-      const gateway = ctx.get?.("typertGateway");
-      if (!gateway) {
-        log(ctx, "warn", "канал асайна: typertGateway не смонтирован — перемещение карточки из GUI недоступно");
-      } else if (typeof gateway.claimsEndpoint === "function") {
-        let claimed = false;
-        try {
-          claimed = gateway.claimsEndpoint(`${NAMESPACE}/assign`) === true;
-        } catch (error) {
-          claimed = false;
-        }
-        if (claimed) {
-          log(ctx, "info", `канал асайна: Gateway видит endpoint ${NAMESPACE}/assign`);
-        } else {
-          log(ctx, "warn", `канал асайна: Gateway не объявил endpoint ${NAMESPACE}/assign — проверьте Typert-маркеры`);
-        }
-      }
     } catch (error) {
       log(ctx, "warn", `канал асайна не поднялся: ${error?.message ?? error}`);
     }
@@ -408,6 +424,19 @@ export function apply(ctx, config = {}) {
     // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
     const debounceMs = Number.isFinite(config?.debounceMs) ? Number(config.debounceMs) : DEBOUNCE_MS;
     const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
+
+    // Самопроверка канала — после стартовой паузы, когда gateway уже смонтирован
+    // (синхронная проба в apply давала ложный «не объявил»). Таймер снимаем по
+    // dispose, чтобы он не выстрелил после выгрузки плагина.
+    const channelProbe = setTimeout(() => {
+      try {
+        probeCardChannel(ctx);
+      } catch (error) {
+        log(ctx, "warn", `канал асайна: самопроверка упала: ${error?.message ?? error}`);
+      }
+    }, catchUpMs);
+    ctx.on?.("dispose", () => clearTimeout(channelProbe));
+
     if (boards.length === 0) {
       log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards");
       return;
