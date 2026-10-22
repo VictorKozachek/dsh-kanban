@@ -37,6 +37,7 @@
 | `bin/task-new.sh` | Завести задачу: worktree + ветка + карточка внутри ветки; `--backlog` — сразу в бэклог, `--spec NNN` — ссылка на спецификацию |
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |
 | `bin/backlog-fill.sh` | Пополнить `todo` из `backlog` до `minTodo` и асайнить свободным исполнителям (`--dry-run`, `--min N`) |
+| `bin/task-assign.sh` | Асайн конкретной карточки самому свободному исполнителю (backlog → todo) и возврат в очередь (`--unassign`, `--dry-run`) |
 | `bin/spec-new.sh` | Завести спецификацию `.kanban/specs/<NNN>.md` по шаблону (сквозной номер) |
 | `.gitignore` | Служебные файлы доски (`.kanban/.watcher-*.json`, `.kanban/.workers.json`, `.kanban/worktrees.json`, `worktrees/`) — им не место в git |
 | `bin/task-commit.sh` | Путь в `merged`: слияние ветки задачи с сообщением по правилу, а для работы, которая уже в `main`, — `--no-merge --reason` (пуш — руками) |

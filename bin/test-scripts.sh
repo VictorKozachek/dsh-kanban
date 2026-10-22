@@ -32,7 +32,7 @@ make_repo() {
     printf 'worktrees/\n' > .gitignore &&
     cp -p "$ROOT/bin/task-new.sh" "$ROOT/bin/task-move.sh" "$ROOT/bin/board-sync.sh" \
     "$ROOT/bin/task-commit.sh" "$ROOT/bin/task-usage.sh" \
-    "$ROOT/bin/backlog-fill.sh" "$ROOT/bin/spec-new.sh" bin/ &&
+    "$ROOT/bin/backlog-fill.sh" "$ROOT/bin/spec-new.sh" "$ROOT/bin/task-assign.sh" bin/ &&
     git add . &&
     git commit -qm init )
 }
@@ -421,6 +421,19 @@ written_owner() {
        /^owner:/ { sub(/^owner:[ \t]*/, ""); gsub(/"/, ""); sub(/[ \t]+$/, ""); print; exit }' "$1"
 }
 
+# Значение произвольного поля карточки без кавычек и хвостовых пробелов.
+written_field() {
+  awk -v key="$2" '
+    NR > 1 && $0 == "---" { exit }
+    index($0, key ":") == 1 {
+      sub("^" key ":[ \t]*", "")
+      gsub(/"/, "")
+      sub(/[ \t]+$/, "")
+      print
+      exit
+    }' "$1"
+}
+
 # Исполнитель держит задачу в работе внутри рабочего дерева (так выглядит задача,
 # заведённая штатным task-new.sh) — он занят, задача уходит следующему.
 tree_repo="$WORK/fill-tree"
@@ -603,6 +616,208 @@ if [[ "$fill_code" == "0" ]] && [[ "$equal_status" == "todo" ]] && [[ "$equal_ow
   pass "при равном updated выигрывает копия из дерева"
 else
   fail "равенство updated: код $fill_code, status '$equal_status', owner '$equal_owner', $(cat "$WORK/fill20" 2>/dev/null)"
+fi
+
+echo "== task-assign: асайн конкретной карточки самому свободному"
+
+# Карточка асайна и «нагрузка» считаются по слитому снимку доски: у w1 две
+# карточки в конвейере, у w2 ни одной — свободнее w2, хотя в пуле он второй.
+assign_repo="$WORK/assign-load"
+make_repo "$assign_repo"
+mkdir -p "$assign_repo/.kanban/tasks"
+printf '["w1","w2"]\n' > "$assign_repo/.kanban/.workers.json"
+write_card "$assign_repo/.kanban/tasks/001.md" 001 in-review w1
+write_card "$assign_repo/.kanban/tasks/002.md" 002 testing w1
+write_card "$assign_repo/.kanban/tasks/010.md" 010 backlog ""
+assign_code=0
+( cd "$assign_repo" && ./bin/task-assign.sh 010 >"$WORK/assign1" 2>&1 ) || assign_code=$?
+assign_owner="$(written_owner "$assign_repo/.kanban/tasks/010.md")"
+if [[ "$assign_code" == "0" ]] && [[ "$assign_owner" == "w2" ]] &&
+   grep -q "исполнитель: w2" "$WORK/assign1" && grep -q "нагрузки:" "$WORK/assign1"; then
+  pass "самый свободный выбирается по нагрузке, а не по порядку пула"
+else
+  fail "нагрузка: код $assign_code, owner '$assign_owner', $(cat "$WORK/assign1" 2>/dev/null)"
+fi
+
+# Равенство нагрузки решает порядок пула: у обоих по одной карточке в конвейере.
+tie_repo="$WORK/assign-tie"
+make_repo "$tie_repo"
+mkdir -p "$tie_repo/.kanban/tasks"
+printf '["w1","w2"]\n' > "$tie_repo/.kanban/.workers.json"
+write_card "$tie_repo/.kanban/tasks/001.md" 001 in-review w1
+write_card "$tie_repo/.kanban/tasks/002.md" 002 testing w2
+write_card "$tie_repo/.kanban/tasks/010.md" 010 backlog ""
+assign_code=0
+( cd "$tie_repo" && ./bin/task-assign.sh 010 >"$WORK/assign2" 2>&1 ) || assign_code=$?
+tie_owner="$(written_owner "$tie_repo/.kanban/tasks/010.md")"
+if [[ "$assign_code" == "0" ]] && [[ "$tie_owner" == "w1" ]]; then
+  pass "при равной нагрузке асайн уходит первому по .workers.json"
+else
+  fail "равенство нагрузок: код $assign_code, owner '$tie_owner', $(cat "$WORK/assign2" 2>/dev/null)"
+fi
+
+# Занятый (есть in-progress) не выбирается, даже если нагрузка у него меньше:
+# w1 занят (1 карточка в конвейере), w2 свободен, но нагружен (2) — асайн w2.
+busy_repo="$WORK/assign-busy"
+make_repo "$busy_repo"
+mkdir -p "$busy_repo/.kanban/tasks"
+printf '["w1","w2"]\n' > "$busy_repo/.kanban/.workers.json"
+write_card "$busy_repo/.kanban/tasks/001.md" 001 in-progress w1
+write_card "$busy_repo/.kanban/tasks/002.md" 002 in-review w2
+write_card "$busy_repo/.kanban/tasks/003.md" 003 testing w2
+write_card "$busy_repo/.kanban/tasks/010.md" 010 backlog ""
+assign_code=0
+( cd "$busy_repo" && ./bin/task-assign.sh 010 >"$WORK/assign3" 2>&1 ) || assign_code=$?
+busy_owner="$(written_owner "$busy_repo/.kanban/tasks/010.md")"
+if [[ "$assign_code" == "0" ]] && [[ "$busy_owner" == "w2" ]] &&
+   grep -q "занят: есть in-progress" "$WORK/assign3"; then
+  pass "занятый исполнитель не выбирается"
+else
+  fail "занятый: код $assign_code, owner '$busy_owner', $(cat "$WORK/assign3" 2>/dev/null)"
+fi
+
+# Все заняты — асайн отклоняется, карточка остаётся в backlog с пустым владельцем.
+allbusy_repo="$WORK/assign-allbusy"
+make_repo "$allbusy_repo"
+mkdir -p "$allbusy_repo/.kanban/tasks"
+printf '["w1","w2"]\n' > "$allbusy_repo/.kanban/.workers.json"
+write_card "$allbusy_repo/.kanban/tasks/001.md" 001 in-progress w1
+write_card "$allbusy_repo/.kanban/tasks/002.md" 002 in-progress w2
+write_card "$allbusy_repo/.kanban/tasks/010.md" 010 backlog ""
+assign_before="$(cksum "$allbusy_repo/.kanban/tasks/010.md")"
+assign_code=0
+( cd "$allbusy_repo" && ./bin/task-assign.sh 010 >"$WORK/assign4" 2>&1 ) || assign_code=$?
+assign_after="$(cksum "$allbusy_repo/.kanban/tasks/010.md")"
+if [[ "$assign_code" == "4" ]] && [[ "$assign_before" == "$assign_after" ]] &&
+   grep -q "все заняты" "$WORK/assign4"; then
+  pass "все заняты — код 4, карточка осталась в backlog"
+else
+  fail "все заняты: код $assign_code, $(cat "$WORK/assign4" 2>/dev/null)"
+fi
+
+# Карточка в рабочем дереве: асайн и коммит уходят в ветку задачи, main не тронут.
+tree_assign_repo="$WORK/assign-tree"
+make_repo "$tree_assign_repo"
+mkdir -p "$tree_assign_repo/.kanban/tasks"
+printf '["w1"]\n' > "$tree_assign_repo/.kanban/.workers.json"
+git -C "$tree_assign_repo" worktree add -q -b task/030 "$tree_assign_repo/worktrees/030" HEAD
+mkdir -p "$tree_assign_repo/worktrees/030/.kanban/tasks"
+write_card "$tree_assign_repo/worktrees/030/.kanban/tasks/030.md" 030 backlog ""
+assign_code=0
+( cd "$tree_assign_repo" && ./bin/task-assign.sh 030 >"$WORK/assign5" 2>&1 ) || assign_code=$?
+tree_status="$(written_field "$tree_assign_repo/worktrees/030/.kanban/tasks/030.md" status)"
+tree_owner="$(written_owner "$tree_assign_repo/worktrees/030/.kanban/tasks/030.md")"
+if [[ "$assign_code" == "0" ]] && [[ "$tree_status" == "todo" ]] && [[ "$tree_owner" == "w1" ]] &&
+   [[ ! -e "$tree_assign_repo/.kanban/tasks/030.md" ]] &&
+   git -C "$tree_assign_repo/worktrees/030" log --oneline -1 | grep -q "kanban(030): todo"; then
+  pass "карточка в рабочем дереве: асайн и коммит в ветке задачи"
+else
+  fail "асайн в дереве: код $assign_code, status '$tree_status', owner '$tree_owner', $(cat "$WORK/assign5" 2>/dev/null)"
+fi
+
+# --unassign: из todo возвращает в backlog и снимает владельца и роль.
+unassign_repo="$WORK/assign-unassign"
+make_repo "$unassign_repo"
+mkdir -p "$unassign_repo/.kanban/tasks"
+printf '["w1"]\n' > "$unassign_repo/.kanban/.workers.json"
+write_card "$unassign_repo/.kanban/tasks/040.md" 040 todo w1 worker
+assign_code=0
+( cd "$unassign_repo" && ./bin/task-assign.sh 040 --unassign >"$WORK/assign6" 2>&1 ) || assign_code=$?
+un_status="$(written_field "$unassign_repo/.kanban/tasks/040.md" status)"
+un_owner="$(written_owner "$unassign_repo/.kanban/tasks/040.md")"
+un_role="$(written_field "$unassign_repo/.kanban/tasks/040.md" role)"
+if [[ "$assign_code" == "0" ]] && [[ "$un_status" == "backlog" ]] &&
+   [[ "$un_owner" == "" ]] && [[ "$un_role" == "" ]]; then
+  pass "--unassign возвращает карточку в backlog и снимает владельца и роль"
+else
+  fail "unassign: код $assign_code, status '$un_status', owner '$un_owner', role '$un_role'"
+fi
+
+# --unassign из in-progress — отказ, карточка не меняется.
+write_card "$unassign_repo/.kanban/tasks/041.md" 041 in-progress w1 worker
+un_before="$(cksum "$unassign_repo/.kanban/tasks/041.md")"
+assign_code=0
+( cd "$unassign_repo" && ./bin/task-assign.sh 041 --unassign >"$WORK/assign7" 2>&1 ) || assign_code=$?
+un_after="$(cksum "$unassign_repo/.kanban/tasks/041.md")"
+if [[ "$assign_code" == "3" ]] && [[ "$un_before" == "$un_after" ]] &&
+   grep -q "уже взяли в работу" "$WORK/assign7"; then
+  pass "--unassign из in-progress — код 3 и карточка не меняется"
+else
+  fail "unassign из in-progress: код $assign_code, $(cat "$WORK/assign7" 2>/dev/null)"
+fi
+
+# --dry-run ничего не меняет и печатает таблицу нагрузок.
+dry_repo="$WORK/assign-dry"
+make_repo "$dry_repo"
+mkdir -p "$dry_repo/.kanban/tasks"
+printf '["w1","w2"]\n' > "$dry_repo/.kanban/.workers.json"
+write_card "$dry_repo/.kanban/tasks/001.md" 001 testing w1
+write_card "$dry_repo/.kanban/tasks/050.md" 050 backlog ""
+dry_before="$(cksum "$dry_repo/.kanban/tasks/050.md"; cd "$dry_repo" && git status --porcelain)"
+assign_code=0
+( cd "$dry_repo" && ./bin/task-assign.sh 050 --dry-run >"$WORK/assign8" 2>&1 ) || assign_code=$?
+dry_after="$(cksum "$dry_repo/.kanban/tasks/050.md"; cd "$dry_repo" && git status --porcelain)"
+if [[ "$assign_code" == "0" ]] && [[ "$dry_before" == "$dry_after" ]] &&
+   grep -q "выдал бы: #050 → w2" "$WORK/assign8" && grep -q "w1: в конвейере 1" "$WORK/assign8"; then
+  pass "--dry-run печатает таблицу нагрузок и ничего не меняет"
+else
+  fail "dry-run: код $assign_code, $(cat "$WORK/assign8" 2>/dev/null)"
+fi
+
+# Пул: fallback на .watcher-roles.json; битый .workers.json — код 1.
+fallback_assign_repo="$WORK/assign-fallback"
+make_repo "$fallback_assign_repo"
+mkdir -p "$fallback_assign_repo/.kanban/tasks"
+printf '{"worker":"w-z","reviewer":"r1"}\n' > "$fallback_assign_repo/.kanban/.watcher-roles.json"
+write_card "$fallback_assign_repo/.kanban/tasks/060.md" 060 backlog ""
+assign_code=0
+( cd "$fallback_assign_repo" && ./bin/task-assign.sh 060 >"$WORK/assign9" 2>&1 ) || assign_code=$?
+fallback_assign_owner="$(written_owner "$fallback_assign_repo/.kanban/tasks/060.md")"
+if [[ "$assign_code" == "0" ]] && [[ "$fallback_assign_owner" == "w-z" ]]; then
+  pass "без .workers.json асайн идёт worker из .watcher-roles.json"
+else
+  fail "fallback асайна: код $assign_code, owner '$fallback_assign_owner', $(cat "$WORK/assign9" 2>/dev/null)"
+fi
+printf '["w1" "w2"]\n' > "$fallback_assign_repo/.kanban/.workers.json"
+write_card "$fallback_assign_repo/.kanban/tasks/061.md" 061 backlog ""
+assign_code=0
+( cd "$fallback_assign_repo" && ./bin/task-assign.sh 061 >"$WORK/assign10" 2>&1 ) || assign_code=$?
+if [[ "$assign_code" == "1" ]] && grep -q "workers.json" "$WORK/assign10"; then
+  pass "битый .workers.json — код 1"
+else
+  fail "битый пул асайна: код $assign_code, $(cat "$WORK/assign10" 2>/dev/null)"
+fi
+
+# Карточка не найдена и карточка не в backlog — код 3 с внятным текстом.
+status_repo="$WORK/assign-status"
+make_repo "$status_repo"
+mkdir -p "$status_repo/.kanban/tasks"
+printf '["w1"]\n' > "$status_repo/.kanban/.workers.json"
+write_card "$status_repo/.kanban/tasks/070.md" 070 todo "" ""
+assign_code=0
+( cd "$status_repo" && ./bin/task-assign.sh 070 >"$WORK/assign11" 2>&1 ) || assign_code=$?
+status_070_before="$(cksum "$status_repo/.kanban/tasks/070.md")"
+assign_code2=0
+( cd "$status_repo" && ./bin/task-assign.sh 999 >"$WORK/assign12" 2>&1 ) || assign_code2=$?
+status_070_after="$(cksum "$status_repo/.kanban/tasks/070.md")"
+if [[ "$assign_code" == "3" ]] && grep -q "только из backlog" "$WORK/assign11" &&
+   [[ "$assign_code2" == "3" ]] && grep -q "не найдена" "$WORK/assign12" &&
+   [[ "$status_070_before" == "$status_070_after" ]]; then
+  pass "карточка не из backlog и несуществующая — код 3"
+else
+  fail "статусы асайна: код $assign_code/код $assign_code2, $(cat "$WORK/assign11" "$WORK/assign12" 2>/dev/null | tr '\n' ' ')"
+fi
+
+# Системный bash 3.2 (на macOS это /bin/bash): скрипт должен работать под ним.
+write_card "$assign_repo/.kanban/tasks/011.md" 011 backlog ""
+if [[ -x /bin/bash ]]; then
+  assign_code=0
+  ( cd "$assign_repo" && /bin/bash ./bin/task-assign.sh 011 --dry-run >"$WORK/assign13" 2>&1 ) || assign_code=$?
+  if [[ "$assign_code" == "0" ]]; then
+    pass "task-assign работает под системным /bin/bash"
+  else
+    fail "task-assign под /bin/bash: код $assign_code, $(cat "$WORK/assign13" 2>/dev/null)"
+  fi
 fi
 
 echo "== .gitignore закрывает служебные файлы доски"
