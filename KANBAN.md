@@ -21,12 +21,14 @@
 | `dsh-kanban/lib/index.js` | Host-половина: сторож доски — наблюдает `.kanban/tasks`, сам подхватывает сессии ролей по выбору пресета и отправляет наряд |
 | `dsh-kanban/lib/watcher-core.js` | Чистая часть сторожа: разбор карточек, снимок доски, правила нарядов |
 | `dsh-kanban/lib/backlog-notices.js` | Чистые правила нарядов бэклога: асайн карточки в `todo` с владельцем и сигнал о недоборе `todo` |
+| `dsh-kanban/lib/card-actions.js` | Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo → backlog` из GUI, host-служба `kanbanCardActions` (Typert Remote в SRC-режиме), запуск `bin/task-assign.sh` |
 | `dsh-kanban/cordis.patch.yml` | Патч-слой пакета: вставляет свой Loader-ряд |
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
 | `dsh-kanban/test/render.test.mjs` | Тест рендера: контекст, колонки, карточки, зачёркивание в `merged`, панель деталей (открытие, переключение, закрытие) |
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
 | `dsh-kanban/test/delivery.test.mjs` | Тесты доставки наряда с поддельным сервисом сессий |
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
+| `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
 | `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
 | `bin/test.sh` | Прогнать все проверки набора |
 | `.kanban/tasks/` | Карточки задач: один `<id>.md` на задачу |

@@ -35,6 +35,13 @@
  *   roles: { reviewer, verifier, dispatcher } — id сессий ролей
  * Без `boards` сторож выключен, без `roles` будит только владельцев карточек.
  *
+ * Кроме сторожа, здесь поднимается командный канал клиент→хост
+ * (`./card-actions.js`): GUI может попросить асайн карточки из `backlog` или
+ * возврат в `backlog` из `todo`, а хост валидирует запрос и запускает
+ * `bin/task-assign.sh` в корне доски. Канал — обычный Typert Remote в режиме
+ * SRC: служба `kanbanCardActions` с методами `assign`/`unassign`. Подробности,
+ * обоснование выбора канала и wire-контракт — в шапке `card-actions.js`.
+ *
  * Браузерная половина (`./client`) от этой не зависят, поэтому вся обвязка
  * обёрнута в try/catch: сломанный сторож не должен уронить загрузку плагина.
  */
@@ -50,6 +57,12 @@ import {
   planAssignmentNotices,
   planRefillNotice,
 } from "./backlog-notices.js";
+import {
+  NAMESPACE,
+  registerCardActionsService,
+  runAssignScript,
+  sessionCwdFromContext,
+} from "./card-actions.js";
 
 /** Сервис, которым GUI отправляет сообщение в сессию. */
 export const inject = ["sessionController"];
@@ -354,6 +367,42 @@ export function apply(ctx, config = {}) {
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+
+    // Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo →
+    // backlog` из GUI. Регистрируется даже без сторожевых `boards`: без них
+    // канал просто отказывает «сессия не привязана к доске», и это понятнее
+    // ошибки «endpoint не найден» на стороне клиента.
+    try {
+      registerCardActionsService(ctx, {
+        boards,
+        snapshot: readSnapshot,
+        resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),
+        runScript: runAssignScript,
+        log: (level, message) => log(ctx, level, message),
+      });
+      // Самопроверка: Gateway находит endpoint по Typert-маркерам в SRC-режиме.
+      // Если маркеры не прочитались (сменилась форма протокола), кнопки в GUI
+      // получат отказ — лучше сказать об этом в лог при старте, чем ловить молча.
+      const gateway = ctx.get?.("typertGateway");
+      if (!gateway) {
+        log(ctx, "warn", "канал асайна: typertGateway не смонтирован — перемещение карточки из GUI недоступно");
+      } else if (typeof gateway.claimsEndpoint === "function") {
+        let claimed = false;
+        try {
+          claimed = gateway.claimsEndpoint(`${NAMESPACE}/assign`) === true;
+        } catch (error) {
+          claimed = false;
+        }
+        if (claimed) {
+          log(ctx, "info", `канал асайна: Gateway видит endpoint ${NAMESPACE}/assign`);
+        } else {
+          log(ctx, "warn", `канал асайна: Gateway не объявил endpoint ${NAMESPACE}/assign — проверьте Typert-маркеры`);
+        }
+      }
+    } catch (error) {
+      log(ctx, "warn", `канал асайна не поднялся: ${error?.message ?? error}`);
+    }
+
     // Эффективная карта ролей: ручные id из строки плагина главнее автокарты.
     const roles = { ...configuredRoles };
     // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
