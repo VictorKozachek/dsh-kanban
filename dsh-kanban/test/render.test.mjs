@@ -507,4 +507,347 @@ const failed = await renderBoard({
 assert.match(failed.text, /Ошибка чтения доски/);
 assert.match(failed.text, /workspace-file\/outside-workspace/);
 
+// ── перенос карточки backlog ↔ todo (host-канал #047) ────────────────────────
+
+const moveCards = {
+  ".kanban/tasks/100.md": "---\nid: 100\ntitle: Черновик в бэклоге\nstatus: backlog\nowner: \"\"\nupdated: 2026-10-22T10:00:00Z\n---\n",
+  ".kanban/tasks/101.md": "---\nid: 101\ntitle: Ждёт в очереди\nstatus: todo\nowner: session-abc\nrole: worker\nupdated: 2026-10-22T10:00:00Z\n---\n",
+  ".kanban/tasks/102.md": "---\nid: 102\ntitle: Уже в работе\nstatus: in-progress\nowner: session-abc\nrole: worker\nupdated: 2026-10-22T10:00:00Z\n---\n",
+  ".kanban/tasks/103.md": "---\nid: 103\ntitle: Слитая задача\nstatus: merged\nowner: \"\"\nupdated: 2026-10-22T10:00:00Z\n---\n"
+};
+
+/** Доска для переносов: три колонки с карточками, Remote только читает. */
+function makeMoveRemote() {
+  return {
+    workspaceFiles: {
+      list: async (_sessionId, dir) =>
+        dir === ".kanban/tasks"
+          ? {
+              ok: true,
+              value: {
+                path: dir,
+                truncated: false,
+                entries: Object.keys(moveCards).map((path) => ({ name: path.split("/").pop(), type: "file", size: 10 }))
+              }
+            }
+          : { ok: false, error: { code: "workspace-file/not-found" } },
+      read: async (_sessionId, path) =>
+        path in moveCards
+          ? { ok: true, value: { text: moveCards[path], lines: 6, eof: true, version: "v1" } }
+          : { ok: false, error: { code: "workspace-file/not-found" } }
+    }
+  };
+}
+
+/**
+ * Доска с поддельным каналом: `responses` — ответы `connection.rpc.call` по
+ * очереди (последний повторяется), плюс журнал вызовов.
+ */
+async function makeMoveBoard(responses, options = {}) {
+  const remote = makeMoveRemote();
+  const { ctx, captured } = makeContext(remote);
+  const calls = [];
+  if (options.connection !== false) {
+    ctx.connection = {
+      rpc: {
+        call: async (api, endpoint, payload, signal) => {
+          calls.push({ api, endpoint, payload, signal: Boolean(signal) });
+          const next = responses.length > 1 ? responses.shift() : responses[0];
+          return typeof next === "function" ? next(payload) : next;
+        }
+      }
+    };
+  }
+  plugin.apply(ctx);
+  const body = captured.bodies["dsh-kanban"];
+  const mover = plugin.__internals.createCardMover(ctx.connection);
+  const props = {
+    sessionId: "session-1",
+    t: ctx.locale.bind("kanban"),
+    useSessions: (selector) => selector({ byId: { "session-1": { cwd: "/tmp/project" } } }),
+    loadBoard: (signal) => plugin.__internals.createLoader(remote)("session-1", signal),
+    moveCard: (action, cardId, signal) => mover("session-1", action, cardId, signal)
+  };
+  return { ctx, captured, calls, body, props };
+}
+
+/** Событие перетаскивания: браузерных dataTransfer и preventDefault хватает. */
+function dragEvent() {
+  const store = {};
+  return {
+    dataTransfer: {
+      setData(type, value) {
+        store[type] = value;
+      },
+      getData(type) {
+        return store[type] || "";
+      },
+      effectAllowed: "",
+      dropEffect: ""
+    },
+    prevented: 0,
+    preventDefault() {
+      this.prevented += 1;
+    }
+  };
+}
+
+function clickEvent() {
+  return {
+    stopped: 0,
+    stopPropagation() {
+      this.stopped += 1;
+    }
+  };
+}
+
+const pickCard = (id) => (node) => node.props["data-kanban-card"] === id;
+const pickColumn = (id) => (node) => node.props["data-kanban-column"] === id;
+const pickAction = (id, action) => (node) =>
+  node.props["data-kanban-action-card"] === id && node.props["data-kanban-action"] === action;
+
+/**
+ * Прогнать доску через шаги: шаг получает готовое дерево и возвращает `true`,
+ * когда обработчик вызван. Между шагами доска перерисовывается и ждёт промисы —
+ * так проверяется вся цепочка «обработчик → канал → состояние → перерисовка».
+ */
+async function drive(board, steps) {
+  mini.reset();
+  let tree = null;
+  let index = 0;
+  for (let pass = 0; pass < 48; pass += 1) {
+    mini.begin();
+    tree = resolve(mini.react.createElement(board.body, board.props));
+    mini.runEffects();
+    await new Promise((done) => setTimeout(done, 0));
+    if (index < steps.length) {
+      const done = await steps[index](tree);
+      if (done) {
+        index += 1;
+        continue;
+      }
+    } else if (!mini.isDirty()) {
+      break;
+    }
+  }
+  mini.cleanup();
+  assert.equal(index, steps.length, `шаги не отработали: ${steps.length - index}`);
+  return tree;
+}
+
+// Карточки бэклога и очереди можно тащить, остальные — нет; кнопки-дубли есть
+// только у них, и колонками-целями объявлены только backlog и todo.
+const dragBoard = await makeMoveBoard([{ ok: true, value: { ok: true, status: "todo", owner: "session-free", message: "" } }]);
+const dragged = await drive(dragBoard, []);
+assert.equal(findNode(dragged, pickCard("100")).props["data-kanban-draggable"], "1", "карточка бэклога должна тащиться");
+assert.equal(findNode(dragged, pickCard("100")).props.draggable, "true", "нужен HTML-атрибут draggable");
+assert.equal(findNode(dragged, pickCard("101")).props["data-kanban-draggable"], "1", "карточка очереди должна тащиться");
+assert.equal(findNode(dragged, pickCard("102")).props["data-kanban-draggable"], undefined, "карточку в работе не тащат");
+assert.equal(findNode(dragged, pickCard("103")).props["data-kanban-draggable"], undefined, "слитую карточку не тащат");
+assert.deepEqual(collectAttrs(dragged, "data-kanban-action-card").sort(), ["100", "101"], "кнопки-дубли только у подвижных карточек");
+assert.equal(findNode(dragged, pickColumn("todo")).props["data-kanban-drop"], "1", "todo — дроп-зона");
+assert.equal(findNode(dragged, pickColumn("backlog")).props["data-kanban-drop"], "1", "backlog — дроп-зона");
+assert.equal(findNode(dragged, pickColumn("in-progress")).props["data-kanban-drop"], undefined, "in-progress — не дроп-зона");
+assert.equal(findNode(dragged, pickColumn("merged")).props["data-kanban-drop"], undefined, "merged — не дроп-зона");
+const dragText = collectText(dragged).join(" | ");
+assert.ok(dragText.includes("→ В работу"), "нет кнопки асайна: " + dragText);
+assert.ok(dragText.includes("← В backlog"), "нет кнопки возврата: " + dragText);
+
+// Дроп backlog → todo: асайн через host-команду с id карточки и сессией.
+const assignBoard = await makeMoveBoard([{ ok: true, value: { ok: true, status: "todo", owner: "session-free", message: "" } }]);
+const afterAssign = await drive(assignBoard, [
+  (current) => {
+    const card = findNode(current, pickCard("100"));
+    if (!card) return false;
+    const event = dragEvent();
+    card.props.onDragStart(event);
+    assert.equal(event.dataTransfer.getData("text/plain"), "100", "в dataTransfer должен уехать id карточки");
+    return true;
+  },
+  (current) => {
+    const column = findNode(current, pickColumn("todo"));
+    if (!column) return false;
+    const event = dragEvent();
+    column.props.onDragOver(event);
+    column.props.onDrop(event);
+    return true;
+  }
+]);
+assert.equal(
+  JSON.stringify(assignBoard.calls.map((call) => [call.api, call.endpoint, call.payload])),
+  JSON.stringify([["/api", "kanbanCardActions/assign", { args: { request: { sessionId: "session-1", cardId: "100" } } }]]),
+  "дроп в todo должен звать assign для карточки 100"
+);
+assert.ok(assignBoard.calls[0].signal, "в канал должен уходить signal отмены");
+assert.deepEqual(collectAttrs(afterAssign, "data-kanban-move-notice"), ["ok"], "успех показывается зелёным баннером");
+assert.ok(collectText(afterAssign).join(" | ").includes("session-free"), "в баннере успеха — выбранный исполнитель");
+
+// Дроп todo → backlog: возврат через unassign.
+const unassignBoard = await makeMoveBoard([{ ok: true, value: { ok: true, status: "backlog", message: "" } }]);
+await drive(unassignBoard, [
+  (current) => {
+    const card = findNode(current, pickCard("101"));
+    if (!card) return false;
+    card.props.onDragStart(dragEvent());
+    return true;
+  },
+  (current) => {
+    const column = findNode(current, pickColumn("backlog"));
+    if (!column) return false;
+    const event = dragEvent();
+    column.props.onDragOver(event);
+    column.props.onDrop(event);
+    return true;
+  }
+]);
+assert.equal(
+  JSON.stringify(unassignBoard.calls.map((call) => [call.endpoint, call.payload.args.request.cardId])),
+  JSON.stringify([["kanbanCardActions/unassign", "101"]]),
+  "дроп в backlog должен звать unassign для карточки 101"
+);
+
+// Отказ хоста («все заняты») — баннер с текстом хоста, карточка остаётся на месте.
+const refuseText = "все заняты: у каждого исполнителя есть карточка in-progress";
+const refuseBoard = await makeMoveBoard([{ ok: true, value: { ok: false, status: "backlog", message: refuseText } }]);
+const afterRefusal = await drive(refuseBoard, [
+  (current) => {
+    const card = findNode(current, pickCard("100"));
+    if (!card) return false;
+    card.props.onDragStart(dragEvent());
+    return true;
+  },
+  (current) => {
+    const column = findNode(current, pickColumn("todo"));
+    if (!column) return false;
+    column.props.onDrop(dragEvent());
+    return true;
+  }
+]);
+assert.deepEqual(collectAttrs(afterRefusal, "data-kanban-move-notice"), ["error"], "отказ хоста — баннер ошибки");
+assert.ok(collectText(afterRefusal).join(" | ").includes("все заняты"), "в баннере должен быть текст хоста");
+assert.equal(findNode(afterRefusal, pickCard("100")).props["data-kanban-status"], "backlog", "после отказа карточка осталась в бэклоге");
+
+// Сбой канала — тоже баннер, а не молчание.
+const brokenBoard = await makeMoveBoard([{ ok: false, error: { code: "transport/offline", message: "нет соединения" } }]);
+const afterBroken = await drive(brokenBoard, [
+  (current) => {
+    const card = findNode(current, pickCard("100"));
+    if (!card) return false;
+    card.props.onDragStart(dragEvent());
+    return true;
+  },
+  (current) => {
+    const column = findNode(current, pickColumn("todo"));
+    if (!column) return false;
+    column.props.onDrop(dragEvent());
+    return true;
+  }
+]);
+assert.deepEqual(collectAttrs(afterBroken, "data-kanban-move-notice"), ["error"]);
+assert.ok(collectText(afterBroken).join(" | ").includes("нет соединения"), "в баннере должна быть причина сбоя канала");
+
+// Нет соединения вовсе — подсказка про канал, а не тихий отказ.
+const offlineBoard = await makeMoveBoard([], { connection: false });
+const afterOffline = await drive(offlineBoard, [
+  (current) => {
+    const button = findNode(current, pickAction("100", "assign"));
+    if (!button) return false;
+    button.props.onClick(clickEvent());
+    return true;
+  }
+]);
+assert.ok(
+  collectText(afterOffline).join(" | ").includes("канал недоступен"),
+  "без соединения кнопка должна объяснить, что канал недоступен"
+);
+
+// Дроп в чужую колонку — подсказка «двигают только агенты» и ни одного запроса.
+const hintBoard = await makeMoveBoard([{ ok: true, value: { ok: true, status: "todo", owner: "w", message: "" } }]);
+const afterHint = await drive(hintBoard, [
+  (current) => {
+    const card = findNode(current, pickCard("100"));
+    if (!card) return false;
+    card.props.onDragStart(dragEvent());
+    return true;
+  },
+  (current) => {
+    const column = findNode(current, pickColumn("in-progress"));
+    if (!column) return false;
+    column.props.onDrop(dragEvent());
+    return true;
+  }
+]);
+assert.equal(hintBoard.calls.length, 0, "в чужую колонку запросов быть не должно");
+assert.ok(collectText(afterHint).join(" | ").includes("только агенты"), "нужна подсказка про агентов");
+
+// Дроп на свою колонку — тишина: это не перенос.
+const sameBoard = await makeMoveBoard([{ ok: true, value: { ok: true, status: "todo", owner: "w", message: "" } }]);
+const afterSame = await drive(sameBoard, [
+  (current) => {
+    const card = findNode(current, pickCard("100"));
+    if (!card) return false;
+    card.props.onDragStart(dragEvent());
+    return true;
+  },
+  (current) => {
+    const column = findNode(current, pickColumn("backlog"));
+    if (!column) return false;
+    column.props.onDrop(dragEvent());
+    return true;
+  }
+]);
+assert.equal(sameBoard.calls.length, 0, "дроп на свою колонку не должен ничего двигать");
+assert.deepEqual(collectAttrs(afterSame, "data-kanban-move-notice"), [], "подсказка на свою колонку не нужна");
+
+// Кнопка-дубль делает то же, что дроп, и не открывает панель деталей.
+const buttonBoard = await makeMoveBoard([{ ok: true, value: { ok: true, status: "todo", owner: "session-free", message: "" } }]);
+const afterButton = await drive(buttonBoard, [
+  (current) => {
+    const button = findNode(current, pickAction("100", "assign"));
+    if (!button) return false;
+    const event = clickEvent();
+    button.props.onClick(event);
+    assert.equal(event.stopped, 1, "клик по кнопке не должен всплывать в панель деталей");
+    return true;
+  }
+]);
+assert.equal(
+  JSON.stringify(buttonBoard.calls.map((call) => [call.endpoint, call.payload.args.request.cardId])),
+  JSON.stringify([["kanbanCardActions/assign", "100"]]),
+  "кнопка асайна должна звать канал"
+);
+assert.deepEqual(collectAttrs(afterButton, "data-kanban-details"), [], "клик по кнопке не открывает панель");
+
+// Пока канал не ответил, кнопка неактивна и показывает «переношу…».
+const gate = {};
+gate.promise = new Promise((resolve) => {
+  gate.release = resolve;
+});
+const busyBoard = await makeMoveBoard([gate.promise]);
+mini.reset();
+let busyTree = null;
+const busyProps = busyBoard.props;
+const busyBody = busyBoard.body;
+for (let pass = 0; pass < 12; pass += 1) {
+  mini.begin();
+  busyTree = resolve(mini.react.createElement(busyBody, busyProps));
+  mini.runEffects();
+  await new Promise((done) => setTimeout(done, 0));
+  if (findNode(busyTree, pickAction("100", "assign"))) break;
+}
+const busyButton = findNode(busyTree, pickAction("100", "assign"));
+assert.ok(busyButton, "кнопка асайна должна быть до клика");
+busyButton.props.onClick(clickEvent());
+mini.begin();
+busyTree = resolve(mini.react.createElement(busyBody, busyProps));
+mini.runEffects();
+await new Promise((done) => setTimeout(done, 0));
+const busyAfter = findNode(busyTree, pickAction("100", "assign"));
+assert.ok(busyAfter, "кнопка должна остаться на месте во время запроса");
+assert.equal(busyAfter.props.disabled, true, "пока канал не ответил, кнопка неактивна");
+assert.ok(collectText(busyTree).join(" | ").includes("переношу"), "во время запроса кнопка показывает «переношу…»");
+gate.release({ ok: true, value: { ok: true, status: "todo", owner: "session-free", message: "" } });
+await new Promise((done) => setTimeout(done, 0));
+mini.cleanup();
+
 console.log("render.test.mjs: все проверки прошли");

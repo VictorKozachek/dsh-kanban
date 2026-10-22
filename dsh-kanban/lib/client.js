@@ -482,9 +482,79 @@ window.__ModuleLoader__.load({
     }
 
     /** Фабрика бизнес-лица: превращает читатель в prop `loadBoard` тела слота. */
-    function boardFace(loadBoard) {
+    /**
+     * Namespace host-команды перемещения карточки: endpoint — `<namespace>/<method>`
+     * (см. `dsh-kanban/lib/card-actions.js`, задача #047).
+     */
+    const CARD_ACTIONS_NAMESPACE = "kanbanCardActions";
+
+    /**
+     * Какие карточки человек двигает руками: колонка → действие host-команды.
+     * Остальные колонки — только агенты по протоколу (`backlog ↔ todo`).
+     */
+    const CARD_ACTIONS = { backlog: "assign", todo: "unassign" };
+
+    /**
+     * Какие перетаскивания допустимы: исходный статус карточки → целевая колонка.
+     * Так же проверяет и хост (`bin/task-assign.sh`), здесь — чтобы подсветить
+     * дроп-зону и не гонять заведомо отказной запрос.
+     */
+    const CARD_DROPS = { backlog: "todo", todo: "backlog" };
+
+    /** Куда колонка принимает дроп: для подсветки цели и проверки в onDrop. */
+    function dropAccepts(columnId) {
+      return Object.keys(CARD_DROPS).some((from) => CARD_DROPS[from] === columnId);
+    }
+
+    /**
+     * Хост-команда перемещения карточки (канал #047): асайн из `backlog` и
+     * возврат из `todo`. Клиент только читает файлы (`workspaceFiles`
+     * read-only), поэтому решение принимает хост, а здесь — запрос и разбор ответа.
+     *
+     * Envelope RPC: `{ ok: true, value: { ok, status, owner?, message } }` или
+     * `{ ok: false, error: { code, message } }`. `value.ok === false` — отказ по
+     * делу («все заняты», «карточка уже в работе»), его текст показываем баннером.
+     *
+     * @param connection - клиентское соединение (`ctx.connection`).
+     * @returns `(sessionId, action, cardId, signal) => Promise<{ok,status,owner,message}>`.
+     */
+    function createCardMover(connection) {
+      return async function moveCard(sessionId, action, cardId, signal) {
+        if (!connection || !connection.rpc || typeof connection.rpc.call !== "function") {
+          // Канала нет вовсе (старый профиль / нет соединения) — это не отказ по
+          // делу: GUI должен сказать «канал недоступен», а не «не удалось».
+          return { ok: false, offline: true, message: "" };
+        }
+        let envelope;
+        try {
+          envelope = await connection.rpc.call(
+            "/api",
+            CARD_ACTIONS_NAMESPACE + "/" + action,
+            { args: { request: { sessionId, cardId } } },
+            signal
+          );
+        } catch (error) {
+          return { ok: false, message: describeError(error) };
+        }
+        if (!envelope || envelope.ok !== true) {
+          const failure = envelope && envelope.error ? describeError(envelope.error) : "";
+          return { ok: false, message: failure };
+        }
+        const value = envelope.value;
+        if (!value || typeof value !== "object") return { ok: false, message: "" };
+        return {
+          ok: value.ok === true,
+          status: String(value.status || ""),
+          owner: String(value.owner || ""),
+          message: String(value.message || "")
+        };
+      };
+    }
+
+    function boardFace(loadBoard, moveCard) {
       return (sessionId) => ({
-        loadBoard: (signal) => loadBoard(sessionId, signal)
+        loadBoard: (signal) => loadBoard(sessionId, signal),
+        moveCard: (action, cardId, signal) => moveCard(sessionId, action, cardId, signal)
       });
     }
 
@@ -530,6 +600,14 @@ window.__ModuleLoader__.load({
       cardTitleMerged: { textDecoration: "line-through", opacity: 0.7 },
       /** Выбранная карточка: панель деталей справа показывает именно её. */
       cardSelected: { outline: "1px solid currentColor", outlineOffset: 1, background: "color-mix(in srgb, currentColor 10%, transparent)" },
+      /** Кнопка-дубль перетаскивания: доступность и запасной путь, если DnD не сработал. */
+      cardActions: { display: "flex", gap: 6, marginTop: 2 },
+      cardAction: { border: "1px solid " + HAIRLINE, background: "transparent", color: "inherit", borderRadius: 6, cursor: "pointer", fontSize: 10, lineHeight: 1, padding: "3px 6px", opacity: 0.85 },
+      cardActionBusy: { border: "1px solid " + HAIRLINE, background: "transparent", color: "inherit", borderRadius: 6, cursor: "progress", fontSize: 10, lineHeight: 1, padding: "3px 6px", opacity: 0.5 },
+      /** Колонка-цель под курсором: видно, куда уедет карточка. */
+      columnOver: { outline: "1px dashed currentColor", outlineOffset: -2, background: "color-mix(in srgb, currentColor 10%, transparent)" },
+      /** Успешный перенос: зелёный баннер, чтобы не путать с ошибкой. */
+      noticeOk: { margin: "6px 10px 0", padding: "5px 8px", borderRadius: 6, fontSize: 11, background: "color-mix(in srgb, #22c55e 14%, transparent)", border: "1px solid color-mix(in srgb, #22c55e 35%, transparent)" },
       meta: { fontSize: 10, opacity: 0.6, wordBreak: "break-all" },
       note: { fontSize: 10, color: "#f97316", wordBreak: "break-word" },
       empty: { padding: "14px 12px", opacity: 0.7, fontSize: 11, maxWidth: 420 },
@@ -652,7 +730,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function Card({ card, t, onSelect, selected }) {
+    function Card({ card, t, onSelect, selected, onMove, onDragStart, onDragEnd, busy }) {
       const column = COLUMN_BY_ID[card.status] || COLUMN_BY_ID.todo;
       const children = [
         h(
@@ -704,6 +782,35 @@ window.__ModuleLoader__.load({
       }
       if (card.note) children.push(h("div", { key: "note", style: styles.note, title: card.note }, clampText(card.note, 140)));
       if (card.updated) children.push(h("div", { key: "updated", style: styles.meta }, card.updated));
+      // Кнопка-дубль: в бэклоге «→ В работу», в очереди «← В backlog». Она нужна
+      // всегда — и для доступности с клавиатуры, и как запасной путь, если
+      // перетаскивание в рендерере не сработает.
+      const action = CARD_ACTIONS[card.status] || "";
+      if (action && typeof onMove === "function") {
+        children.push(
+          h(
+            "div",
+            { key: "actions", style: styles.cardActions },
+            h(
+              "button",
+              {
+                type: "button",
+                "data-kanban-action": action,
+                "data-kanban-action-card": card.id,
+                style: busy ? styles.cardActionBusy : styles.cardAction,
+                disabled: busy === true,
+                title: action === "assign" ? t("move.assignTitle") : t("move.unassignTitle"),
+                onClick: (event) => {
+                  // Кнопка не должна открывать панель деталей.
+                  if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+                  if (!busy) onMove(action);
+                }
+              },
+              busy ? t("move.busy") : action === "assign" ? t("move.assign") : t("move.unassign")
+            )
+          )
+        );
+      }
       const style = Object.assign(
         {},
         styles.card,
@@ -711,6 +818,7 @@ window.__ModuleLoader__.load({
         selected ? styles.cardSelected : null,
         onSelect ? { cursor: "pointer" } : null
       );
+      const draggable = Boolean(action) && typeof onDragStart === "function" && !busy;
       return h(
         "article",
         {
@@ -718,6 +826,10 @@ window.__ModuleLoader__.load({
           title: card.file,
           "data-kanban-card": card.id,
           "data-kanban-status": card.status,
+          "data-kanban-draggable": draggable ? "1" : undefined,
+          draggable: draggable ? "true" : undefined,
+          onDragStart: draggable ? (event) => onDragStart(event, card, action) : undefined,
+          onDragEnd: draggable && typeof onDragEnd === "function" ? () => onDragEnd(card) : undefined,
           onClick: onSelect ? () => onSelect(card.key) : undefined
         },
         children
@@ -742,6 +854,19 @@ window.__ModuleLoader__.load({
       const [state, setState] = React.useState({ phase: "loading", cards: [], problems: [], truncated: false, error: "" });
       // Какая карточка открыта в панели деталей (ключ — имя файла).
       const [selectedKey, setSelectedKey] = React.useState(null);
+      // Перенос карточки: что показываем баннером, какая карточка в полёте и
+      // какая сейчас тащится. Данные перетаскивания держим в ref: обработчики
+      // drop/dragover приходят из разных рендеров, состояние в них устаревает.
+      const [notice, setNotice] = React.useState(null);
+      const [busyKey, setBusyKey] = React.useState(null);
+      const [dropTarget, setDropTarget] = React.useState("");
+      const dragRef = React.useRef(null);
+      const moveRef = React.useRef(props.moveCard);
+      // Контроллер текущего запроса: при уходе с доски отменяем перенос.
+      const moveAbortRef = React.useRef(null);
+      React.useEffect(() => {
+        moveRef.current = props.moveCard;
+      }, [props.moveCard]);
       const signature = React.useRef("");
       const tickRef = React.useRef(null);
       const loadRef = React.useRef(loadBoard);
@@ -783,8 +908,90 @@ window.__ModuleLoader__.load({
           stopped = true;
           if (timer) clearInterval(timer);
           controller.abort();
+          if (moveAbortRef.current) moveAbortRef.current.abort();
         };
       }, [sessionId]);
+
+      /** Перенос карточки: асайн или возврат через host-команду канала #047. */
+      const runMove = async (card, action) => {
+        if (!card || busyKey) return;
+        const move = moveRef.current;
+        if (typeof move !== "function") {
+          setNotice({ kind: "error", text: t("move.unavailable") });
+          return;
+        }
+        setBusyKey(card.key);
+        setNotice(null);
+        const controller = new AbortController();
+        moveAbortRef.current = controller;
+        let result;
+        try {
+          result = await move(action, card.id, controller.signal);
+        } catch (error) {
+          result = { ok: false, message: describeError(error) };
+        }
+        if (moveAbortRef.current === controller) moveAbortRef.current = null;
+        setBusyKey(null);
+        if (result && result.ok) {
+          // Доска перечитывается сама: новый статус и владелец должны появиться
+          // без ожидания опроса.
+          setNotice({ kind: "ok", text: t("move.done") + (result.owner ? ": " + result.owner : "") });
+          if (typeof tickRef.current === "function") void tickRef.current();
+        } else {
+          const failure = result && result.message;
+          setNotice({ kind: "error", text: failure || (result && result.offline ? t("move.unavailable") : t("move.failed")) });
+        }
+      };
+
+      /** Можно ли бросить карточку в эту колонку. */
+      const canDrop = (drag, columnId) => Boolean(drag) && CARD_DROPS[drag.card.status] === columnId;
+
+      const startDrag = (event, card, action) => {
+        dragRef.current = { card, action };
+        setDropTarget("");
+        // dataTransfer нужен браузеру для старта перетаскивания; недоступен —
+        // не беда, у нас есть кнопка-дубль.
+        if (event && event.dataTransfer) {
+          try {
+            event.dataTransfer.setData("text/plain", card.id);
+            event.dataTransfer.effectAllowed = "move";
+          } catch (error) {
+            /* браузер вправе запретить dataTransfer — перетаскивание всё равно начнётся */
+          }
+        }
+      };
+
+      const endDrag = () => {
+        dragRef.current = null;
+        setDropTarget("");
+      };
+
+      const dragOverColumn = (column, event) => {
+        // preventDefault разрешает drop; без него браузер отменит перенос.
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        const drag = dragRef.current;
+        if (!drag) return;
+        if (event && event.dataTransfer) {
+          event.dataTransfer.dropEffect = canDrop(drag, column.id) ? "move" : "none";
+        }
+        const next = canDrop(drag, column.id) ? column.id : "";
+        setDropTarget((previous) => (previous === next ? previous : next));
+      };
+
+      const dropOnColumn = (column, event) => {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        const drag = dragRef.current;
+        dragRef.current = null;
+        setDropTarget("");
+        if (!drag) return;
+        if (canDrop(drag, column.id)) {
+          void runMove(drag.card, CARD_ACTIONS[drag.card.status]);
+          return;
+        }
+        // На свою колонку бросили — это не перенос, подсказка не нужна.
+        if (drag.card.status === column.id) return;
+        setNotice({ kind: "error", text: t("move.onlyAgents") });
+      };
 
       const columns = COLUMNS.map((column) => ({
         column,
@@ -817,6 +1024,22 @@ window.__ModuleLoader__.load({
       if (state.error) body.push(h("div", { key: "error", style: styles.banner }, t("error") + ": " + state.error));
       if (state.problems.length) body.push(h("div", { key: "problems", style: styles.note }, t("problems") + ": " + state.problems.join("; ")));
       if (state.truncated) body.push(h("div", { key: "truncated", style: styles.note }, t("truncated")));
+      // Баннер переноса: отказ хоста («все заняты», «карточка уже в работе»),
+      // недоступный канал или подтверждение асайна.
+      if (notice) {
+        body.push(
+          h(
+            "div",
+            {
+              key: "move-notice",
+              style: notice.kind === "error" ? styles.banner : styles.noticeOk,
+              "data-kanban-move-notice": notice.kind,
+              role: "status"
+            },
+            notice.text
+          )
+        );
+      }
 
       if (state.cards.length === 0 && !state.error) {
         body.push(h("div", { key: "empty", style: styles.empty }, h("div", null, t("missing")), h("div", { style: styles.mono }, 'bash bin/task-new.sh "название задачи"')));
@@ -828,7 +1051,18 @@ window.__ModuleLoader__.load({
             columns.map(({ column, items }) =>
               h(
                 "section",
-                { key: column.id, style: styles.column, "data-kanban-column": column.id },
+                {
+                  key: column.id,
+                  style:
+                    dropTarget === column.id
+                      ? Object.assign({}, styles.column, styles.columnOver)
+                      : styles.column,
+                  "data-kanban-column": column.id,
+                  "data-kanban-drop": dropAccepts(column.id) ? "1" : undefined,
+                  onDragOver: (event) => dragOverColumn(column, event),
+                  onDragLeave: () => setDropTarget((previous) => (previous === column.id ? "" : previous)),
+                  onDrop: (event) => dropOnColumn(column, event)
+                },
                 h(
                   "header",
                   { style: styles.columnHeader },
@@ -847,7 +1081,13 @@ window.__ModuleLoader__.load({
                           card,
                           t,
                           onSelect: setSelectedKey,
-                          selected: card.key === selectedKey
+                          selected: card.key === selectedKey,
+                          onMove: (action) => {
+                            void runMove(card, action);
+                          },
+                          onDragStart: startDrag,
+                          onDragEnd: endDrag,
+                          busy: busyKey === card.key
                         })
                       )
                 )
@@ -899,7 +1139,16 @@ window.__ModuleLoader__.load({
       "column.testing": "Тестирование",
       "column.ready": "Готово к слиянию",
       "column.merged": "Влито",
-      "column.blocked": "Заблокировано"
+      "column.blocked": "Заблокировано",
+      "move.assign": "→ В работу",
+      "move.unassign": "← В backlog",
+      "move.assignTitle": "Отдать карточку самому свободному исполнителю",
+      "move.unassignTitle": "Вернуть карточку в backlog",
+      "move.busy": "переношу…",
+      "move.done": "перенесено",
+      "move.failed": "не удалось перенести карточку",
+      "move.onlyAgents": "эту карточку двигают только агенты",
+      "move.unavailable": "канал недоступен: обновите страницу, а после обновления плагина перезапустите приложение"
     };
 
     const en = {
@@ -934,11 +1183,20 @@ window.__ModuleLoader__.load({
       "column.testing": "Testing",
       "column.ready": "Ready to merge",
       "column.merged": "Merged",
-      "column.blocked": "Blocked"
+      "column.blocked": "Blocked",
+      "move.assign": "→ To work",
+      "move.unassign": "← To backlog",
+      "move.assignTitle": "Hand the card to the freest worker",
+      "move.unassignTitle": "Return the card to the backlog",
+      "move.busy": "moving…",
+      "move.done": "moved",
+      "move.failed": "could not move the card",
+      "move.onlyAgents": "only agents move this card",
+      "move.unavailable": "channel unavailable: reload the page, and restart the app after a plugin update"
     };
 
     /** Сервисы Cordis, без которых `apply` не запускается. */
-    const inject = ["slots", "locale", "sidebarRightTabs", "remote", "remote.workspaceFiles"];
+    const inject = ["slots", "locale", "sidebarRightTabs", "remote", "remote.workspaceFiles", "connection"];
 
     /** Тело плагина: тип таба, словари, тело и заголовок. */
     function apply(ctx) {
@@ -958,11 +1216,13 @@ window.__ModuleLoader__.load({
       );
 
       const loadBoard = createLoader(ctx.remote);
+      // Канал перемещения карточки живёт на хосте (#047): клиент только читает файлы.
+      const moveCard = createCardMover(ctx.connection);
       ctx.effect(
         () =>
           ctx.slots.inject("sidebar.right.pane.tab", () =>
             ctx.slots.register(
-              { name: "sidebar.right.pane.tab", key: ID, locale: NS, inject: boardFace(loadBoard) },
+              { name: "sidebar.right.pane.tab", key: ID, locale: NS, inject: boardFace(loadBoard, moveCard) },
               KanbanBody
             )
           ),
@@ -981,7 +1241,7 @@ window.__ModuleLoader__.load({
     exports.inject = inject;
     // Внутренности для тестов и генератора макета (dsh-kanban/test,
     // dsh-kanban/docs): рантайм DSH их не использует, браузеру они не мешают.
-    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, splitCardBody, CardDetails, styles, COLUMNS };
+    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, splitCardBody, createCardMover, CARD_ACTIONS, CARD_DROPS, CardDetails, styles, COLUMNS };
     return module.exports;
   }
 });
