@@ -408,6 +408,18 @@ export function apply(ctx, config = {}) {
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+    /** Корни наблюдаемых досок: наряд и роль не должны пересекать эту границу. */
+    const boardRoots = boards.map((entry) =>
+      path.resolve(String(entry && typeof entry === "object" ? entry.path : entry)));
+    /** Корень доски, внутри которого лежит каталог; null — вне наблюдаемых досок. */
+    const boardRootOf = (cwd) => {
+      if (typeof cwd !== "string" || cwd === "") return null;
+      const target = path.resolve(cwd);
+      for (const root of boardRoots) {
+        if (target === root || target.startsWith(root + path.sep)) return root;
+      }
+      return null;
+    };
 
     // Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo →
     // backlog` из GUI. Регистрируется даже без сторожевых `boards`: без них
@@ -488,7 +500,19 @@ export function apply(ctx, config = {}) {
       const deliverOnce = (key, item) => {
         if (state[key] || inFlight.has(key)) return;
         inFlight.add(key);
-        void deliver(ctx, item).then((accepted) => {
+        void (async () => {
+          // Граница доски: наряд уходит только сессии, чей каталог внутри этого корня.
+          let cwd = null;
+          try {
+            cwd = await sessionCwdFromContext(ctx, item.sessionId);
+          } catch {
+            cwd = null;
+          }
+          if (cwd !== null && boardRootOf(cwd) !== path.resolve(root)) {
+            log(ctx, "warn", `наряд по #${item.cardId} пропущен: сессия ${item.sessionId} вне доски ${root}`);
+            return;
+          }
+          const accepted = await deliver(ctx, item).catch(() => false);
           inFlight.delete(key);
           if (!accepted) {
             // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
@@ -511,7 +535,7 @@ export function apply(ctx, config = {}) {
             delete pending[key];
             saveState(pendingFile, pending);
           }
-        });
+        })();
       };
 
       /**
@@ -659,23 +683,45 @@ export function apply(ctx, config = {}) {
     // `agent-preset/selected` (sessionId, agentPreset) — см. dsh-agent-presets.
     // Так id ролей не приходится держать руками, и они не стареют, когда сессию
     // роли пересоздают: новая сессия снова выберет пресет и снова объявится.
-    const persistRoles = () => {
+    const persistRoles = (onlyRoot) => {
       const auto = {};
       for (const role of ROLES) {
         if (!configuredRoles[role] && roles[role]) auto[role] = roles[role];
       }
-      for (const board of boards) {
-        saveState(path.join(String(board), ".kanban", ROLES_FILE), auto);
+      const scope = onlyRoot ? [onlyRoot] : boards.map((entry) =>
+        String(entry && typeof entry === "object" ? entry.path : entry));
+      for (const root of scope) {
+        saveState(path.join(String(root), ".kanban", ROLES_FILE), auto);
       }
     };
     ctx.on?.("agent-preset/selected", (sessionId, agentPreset) => {
       const role = roleOfPreset(agentPreset);
       if (!role || configuredRoles[role]) return;
       const id = String(sessionId ?? "");
-      if (!id || roles[role] === id) return;
+      if (!id) return;
+      if (roles[role] === id) return;
+      // Закрепляем сразу: карту ролей надо успеть записать до перезапуска профиля.
       roles[role] = id;
       persistRoles();
       log(ctx, "info", `роль ${role} закреплена за сессией ${id} (пресет ${agentPreset})`);
+      // Сессия вне наблюдаемых досок ролью быть не может: пресет, выбранный в чужом
+      // воркспейсе, иначе перехватит роль и наряды уйдут не туда. Проверка
+      // асинхронная (нужен cwd сессии), поэтому роль снимается после ответа.
+      void (async () => {
+        let cwd = null;
+        try {
+          cwd = await sessionCwdFromContext(ctx, id);
+        } catch {
+          cwd = null;
+        }
+        if (cwd === null || boardRootOf(cwd) !== null) return;
+        if (roles[role] === id) {
+          delete roles[role];
+          persistRoles();
+          log(ctx, "warn", `сессия ${id} вне досок сторожа — роль ${role} снята`);
+        }
+      })();
+      {
       // Карточки, которые ждали роль до её появления, иначе остались бы без наряда
       // до следующего перехода: сессия роли выбирает пресет один раз при создании.
       for (const again of reannounce) {
@@ -684,6 +730,7 @@ export function apply(ctx, config = {}) {
         } catch (error) {
           log(ctx, "warn", `не объявил доску после появления роли: ${error?.message ?? error}`);
         }
+      }
       }
     });
 
