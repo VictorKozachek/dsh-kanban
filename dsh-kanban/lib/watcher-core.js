@@ -176,6 +176,9 @@ function notice(card, sessionId, text, kind) {
  */
 export function planNotices(previous, next, options = {}) {
   const notices = [];
+  /** Абсолютный путь карточки: сессия должна открыть файл именно этой доски. */
+  const board = typeof options?.board === "string" && options.board !== "" ? options.board.replace(/\/+$/, "") : "";
+  const placeOf = (id) => (board ? `${board}/.kanban/tasks/${id}.md` : `.kanban/tasks/${id}.md`);
   const role = (name) => {
     const value = options?.[name];
     return typeof value === "string" && value.length > 0 ? value : null;
@@ -187,7 +190,7 @@ export function planNotices(previous, next, options = {}) {
     if (before && (before.status ?? "") === status) continue;
     if (!before && !status) continue;
 
-    const place = `.kanban/tasks/${id}.md`;
+    const place = placeOf(id);
     const title = card.title ? ` «${card.title}»` : "";
 
     if (status === "in-progress") {

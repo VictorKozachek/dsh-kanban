@@ -109,7 +109,9 @@ export function assignmentKey(card) {
  * @param next - снимок после изменения.
  * @returns Список нарядов `{cardId, sessionId, kind, status, key, text}`.
  */
-export function planAssignmentNotices(previous, next) {
+export function planAssignmentNotices(previous, next, options = {}) {
+  const board = typeof options?.board === "string" && options.board !== "" ? options.board.replace(/\/+$/, "") : "";
+  const placeOf = (id) => (board ? `${board}/.kanban/tasks/${id}.md` : `.kanban/tasks/${id}.md`);
   const notices = [];
   for (const [id, card] of next ?? []) {
     if ((card?.status ?? "") !== "todo") continue;
@@ -119,7 +121,7 @@ export function planAssignmentNotices(previous, next) {
     const before = previous?.get(id);
     if (before && (before.status ?? "") === "todo" && String(before.owner ?? "") === owner) continue;
 
-    const place = `.kanban/tasks/${id}.md`;
+    const place = placeOf(id);
     const title = card.title ? ` «${card.title}»` : "";
     notices.push({
       cardId: id,

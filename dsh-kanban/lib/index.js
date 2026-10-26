@@ -150,6 +150,45 @@ function mainTasksDir(root) {
  *   файл, который в этом источнике считается живой карточкой задачи (пусто —
  *   читать все).
  */
+/** Каталоги, которые обход `roots` не трогает: там доска не живёт. */
+const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "build", "templates", "target"]);
+
+/**
+ * Найти все доски под корнем: каталоги, где есть `.kanban/tasks`.
+ *
+ * @param root - корень обхода из `config.roots`.
+ * @param maxDepth - глубина обхода (компонент обычно на 2–4 уровня ниже корня).
+ * @returns Абсолютные пути каталогов с досками.
+ */
+function discoverBoards(root, maxDepth = 6) {
+  const found = [];
+  const walk = (dir, depth) => {
+    if (depth > maxDepth) return;
+    try {
+      if (fs.statSync(path.join(dir, ".kanban", "tasks")).isDirectory()) {
+        found.push(dir);
+        return;
+      }
+    } catch {
+      /* нет доски — идём глубже */
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith(".")) continue;
+      if (IGNORED_DIRS.has(entry.name)) continue;
+      walk(path.join(dir, entry.name), depth + 1);
+    }
+  };
+  walk(path.resolve(root), 0);
+  return found;
+}
+
 function boardSources(root) {
   const sources = [{ dir: mainTasksDir(root), worktree: null, cardFile: "" }];
   for (const trees of WORKTREES_DIRS) {
@@ -408,14 +447,23 @@ export function apply(ctx, config = {}) {
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
+    /** Корни, под которыми сторож ищет доски каждого воркспейса. */
+    const roots = Array.isArray(config?.roots) ? config.roots.map((entry) => path.resolve(String(entry))) : [];
+    /** Все наблюдаемые доски: явные `boards` + найденные под `roots`. */
+    const watchedBoards = () => {
+      const set = new Set(boards.map((entry) => path.resolve(String(entry && typeof entry === "object" ? entry.path : entry))));
+      for (const root of roots) {
+        for (const found of discoverBoards(root)) set.add(path.resolve(found));
+      }
+      return [...set];
+    };
     /** Корни наблюдаемых досок: наряд и роль не должны пересекать эту границу. */
-    const boardRoots = boards.map((entry) =>
-      path.resolve(String(entry && typeof entry === "object" ? entry.path : entry)));
+    const boardRoots = () => watchedBoards();
     /** Корень доски, внутри которого лежит каталог; null — вне наблюдаемых досок. */
     const boardRootOf = (cwd) => {
       if (typeof cwd !== "string" || cwd === "") return null;
       const target = path.resolve(cwd);
-      for (const root of boardRoots) {
+      for (const root of boardRoots()) {
         if (target === root || target.startsWith(root + path.sep)) return root;
       }
       return null;
@@ -427,7 +475,7 @@ export function apply(ctx, config = {}) {
     // ошибки «endpoint не найден» на стороне клиента.
     try {
       registerCardActionsService(ctx, {
-        boards,
+        boards: watchedBoards(),
         snapshot: readSnapshot,
         resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),
         runScript: runAssignScript,
@@ -437,8 +485,14 @@ export function apply(ctx, config = {}) {
       log(ctx, "warn", `канал асайна не поднялся: ${error?.message ?? error}`);
     }
 
-    // Эффективная карта ролей: ручные id из строки плагина главнее автокарты.
-    const roles = { ...configuredRoles };
+    // Эффективные карты ролей: на каждую доску своя, чтобы ревьювер одного
+    // воркспейса не обслуживал карточки другого. Ручные id из конфига главнее.
+    const rolesByRoot = new Map();
+    const rolesFor = (root) => {
+      const key = String(root);
+      if (!rolesByRoot.has(key)) rolesByRoot.set(key, { ...configuredRoles });
+      return rolesByRoot.get(key);
+    };
     // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
     const debounceMs = Number.isFinite(config?.debounceMs) ? Number(config.debounceMs) : DEBOUNCE_MS;
     const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
@@ -455,8 +509,8 @@ export function apply(ctx, config = {}) {
     }, catchUpMs);
     ctx.on?.("dispose", () => clearTimeout(channelProbe));
 
-    if (boards.length === 0) {
-      log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards");
+    if (boards.length === 0 && roots.length === 0) {
+      log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards и roots");
       return;
     }
 
@@ -465,7 +519,7 @@ export function apply(ctx, config = {}) {
     /** Повторный обход досок: нужен, когда роль появляется позже карточки. */
     const reannounce = [];
 
-    for (const board of boards) {
+    for (const board of watchedBoards()) {
       const root = String(board);
       const tasksDir = mainTasksDir(root);
       const stateFile = path.join(root, ".kanban", ".watcher-state.json");
@@ -481,8 +535,9 @@ export function apply(ctx, config = {}) {
 
       // Автокарту ролей читаем с доски: она переживает перезапуск профиля.
       // Ручной конфиг главнее — он остаётся на случай, когда событие не пришло.
+      const boardRoles = rolesFor(root);
       for (const [role, sessionId] of Object.entries(loadState(path.join(String(board), ".kanban", ROLES_FILE)))) {
-        if (!configuredRoles[role] && !roles[role]) roles[role] = String(sessionId);
+        if (!configuredRoles[role] && !boardRoles[role]) boardRoles[role] = String(sessionId);
       }
 
       const state = loadState(stateFile);
@@ -548,7 +603,7 @@ export function apply(ctx, config = {}) {
       const announceRefill = (next) => {
         let plan;
         try {
-          plan = planRefillNotice(next, { minTodo: readMinTodo(boardFile), dispatcher: roles.dispatcher });
+          plan = planRefillNotice(next, { minTodo: readMinTodo(boardFile), dispatcher: boardRoles.dispatcher, board: root });
         } catch (error) {
           log(ctx, "warn", `не разобрал пополнение todo: ${error?.message ?? error}`);
           return;
@@ -576,7 +631,7 @@ export function apply(ctx, config = {}) {
       const announce = (before, next) => {
         let notices = [];
         try {
-          notices = planNotices(before, next, roles);
+          notices = planNotices(before, next, { ...boardRoles, board: root });
         } catch (error) {
           log(ctx, "warn", `не разобрал переходы доски: ${error?.message ?? error}`);
           return;
@@ -584,7 +639,7 @@ export function apply(ctx, config = {}) {
         // Асайн из `backlog` (`todo` с владельцем) ядро не объявляет — это не переход
         // статуса, а выдача задачи конкретному исполнителю.
         try {
-          notices = notices.concat(planAssignmentNotices(before, next));
+          notices = notices.concat(planAssignmentNotices(before, next, { board: root }));
         } catch (error) {
           log(ctx, "warn", `не разобрал асайны доски: ${error?.message ?? error}`);
         }
@@ -683,30 +738,34 @@ export function apply(ctx, config = {}) {
     // `agent-preset/selected` (sessionId, agentPreset) — см. dsh-agent-presets.
     // Так id ролей не приходится держать руками, и они не стареют, когда сессию
     // роли пересоздают: новая сессия снова выберет пресет и снова объявится.
-    const persistRoles = (onlyRoot) => {
+    const persistRoles = (root) => {
+      if (root === undefined || root === null || root === "") return;
       const auto = {};
+      const boardRoles = rolesFor(root);
       for (const role of ROLES) {
-        if (!configuredRoles[role] && roles[role]) auto[role] = roles[role];
+        if (!configuredRoles[role] && boardRoles[role]) auto[role] = boardRoles[role];
       }
-      const scope = onlyRoot ? [onlyRoot] : boards.map((entry) =>
-        String(entry && typeof entry === "object" ? entry.path : entry));
-      for (const root of scope) {
-        saveState(path.join(String(root), ".kanban", ROLES_FILE), auto);
-      }
+      saveState(path.join(String(root), ".kanban", ROLES_FILE), auto);
     };
     ctx.on?.("agent-preset/selected", (sessionId, agentPreset) => {
       const role = roleOfPreset(agentPreset);
       if (!role || configuredRoles[role]) return;
       const id = String(sessionId ?? "");
       if (!id) return;
-      if (roles[role] === id) return;
+      // Доска по умолчанию: единственная наблюдаемая (тесты и профиль с одним
+      // проектом). Иначе роль до прихода cwd остаётся без подтверждения.
+      const all = watchedBoards();
+      const fallbackRoot = all.length === 1 ? all[0] : null;
+      const fallbackKey = fallbackRoot ?? "";
+      const fallbackRoles = rolesFor(fallbackKey);
+      if (fallbackRoles[role] === id) return;
       // Закрепляем сразу: карту ролей надо успеть записать до перезапуска профиля.
-      roles[role] = id;
-      persistRoles();
+      fallbackRoles[role] = id;
+      persistRoles(fallbackKey);
       log(ctx, "info", `роль ${role} закреплена за сессией ${id} (пресет ${agentPreset})`);
       // Сессия вне наблюдаемых досок ролью быть не может: пресет, выбранный в чужом
       // воркспейсе, иначе перехватит роль и наряды уйдут не туда. Проверка
-      // асинхронная (нужен cwd сессии), поэтому роль снимается после ответа.
+      // асинхронная (нужен cwd сессии), поэтому роль переносится или снимается после ответа.
       void (async () => {
         let cwd = null;
         try {
@@ -714,14 +773,25 @@ export function apply(ctx, config = {}) {
         } catch {
           cwd = null;
         }
-        if (cwd === null || boardRootOf(cwd) !== null) return;
-        if (roles[role] === id) {
-          delete roles[role];
-          persistRoles();
-          log(ctx, "warn", `сессия ${id} вне досок сторожа — роль ${role} снята`);
+        if (cwd === null) return;
+        const root = boardRootOf(cwd);
+        if (root === null) {
+          if (fallbackRoles[role] === id) {
+            delete fallbackRoles[role];
+            persistRoles(fallbackKey);
+            log(ctx, "warn", `сессия ${id} вне досок сторожа — роль ${role} снята`);
+          }
+          return;
+        }
+        // Роль принадлежит той доске, внутри которой живёт сессия.
+        if (String(root) !== String(fallbackKey)) {
+          if (fallbackRoles[role] === id) delete fallbackRoles[role];
+          rolesFor(root)[role] = id;
+          persistRoles(root);
+          if (fallbackKey !== "") persistRoles(fallbackKey);
+          log(ctx, "info", `роль ${role} закреплена за доской ${root} (сессия ${id})`);
         }
       })();
-      {
       // Карточки, которые ждали роль до её появления, иначе остались бы без наряда
       // до следующего перехода: сессия роли выбирает пресет один раз при создании.
       for (const again of reannounce) {
@@ -731,10 +801,9 @@ export function apply(ctx, config = {}) {
           log(ctx, "warn", `не объявил доску после появления роли: ${error?.message ?? error}`);
         }
       }
-      }
     });
 
-    log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${Object.keys(roles).length}`);
+    log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${[...rolesByRoot.values()].reduce((n, item) => n + Object.keys(item).length, 0)}`);
     ctx.on?.("dispose", () => {
       for (const watcher of watchers) {
         try {
