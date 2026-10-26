@@ -167,10 +167,11 @@ function discoverBoards(root, maxDepth = 6) {
     try {
       if (fs.statSync(path.join(dir, ".kanban", "tasks")).isDirectory()) {
         found.push(dir);
-        return;
+        // Не останавливаемся: у корня проекта тоже есть доска, а компоненты
+        // лежат ниже и каждому нужен свой сторож.
       }
     } catch {
-      /* нет доски — идём глубже */
+      /* нет доски — просто идём глубже */
     }
     let entries;
     try {
