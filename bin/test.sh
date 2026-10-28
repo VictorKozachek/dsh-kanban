@@ -31,7 +31,11 @@ echo "== рендер доски (регистрация в контексте, 
 
 echo "== макет: проверки painter'а (высота карточки и предел чипа владельца)"
 if command -v python3 >/dev/null 2>&1; then
-  PATH="$(dirname "$("$NODE" --which)"):$PATH" python3 "$ROOT/dsh-kanban/docs/check-mockup.py"
+  # python3 запоминаем ДО подмены PATH: каталог node (например
+  # /opt/homebrew/bin) может содержать свой python3 без Pillow, и тогда проверка
+  # падает на `import PIL`, хотя рабочий python3 в PATH есть (#056).
+  PYTHON3="$(command -v python3)"
+  PATH="$(dirname "$("$NODE" --which)"):$PATH" "$PYTHON3" "$ROOT/dsh-kanban/docs/check-mockup.py"
 else
   echo "   python3 не найден — проверки painter'а пропущены"
 fi

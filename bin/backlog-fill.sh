@@ -295,6 +295,16 @@ build_snapshot() {
 
 cleanup() {
   [[ -n "$SNAPSHOT_FILE" ]] && rm -f "$SNAPSHOT_FILE"
+  # Свой статус уборки не важен: код возврата скрипта сохраняет on_exit.
+  return 0
+}
+
+# EXIT-ловушка не должна затирать код возврата (см. #056): статус запоминается
+# до уборки и возвращается после неё.
+on_exit() {
+  local code=$?
+  cleanup || true
+  exit "$code"
 }
 
 # Занят ли исполнитель: у него есть карточка в работе на любой доске проекта.
@@ -321,7 +331,7 @@ if [[ ! -d "$TASKS_DIR" ]]; then
 fi
 
 SNAPSHOT_FILE=""
-trap cleanup EXIT
+trap on_exit EXIT
 build_snapshot
 
 MIN="$(read_min_todo "$MIN_OVERRIDE")"
