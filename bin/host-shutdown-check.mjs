@@ -25,22 +25,32 @@
  * временные доски, свободный порт. Живой `~/.dsh` и живые сессии не трогаются:
  * всё лежит в `mkdtemp`.
  *
- * Порт. В host-энтри (`dsh-desktop-host/lib/index.js`) порт зашит: `"--port",
- * "19387"`. Если живое приложение запущено, порт занят, и второй Host падает с
- * `EADDRINUSE`. Поэтому харнесс подменяет литерал на `0` (ОС выдаёт свободный
- * порт) через ESM-хук `--import`: сам файл энтри не копируется и реальный граф
- * модулей не меняется.
+ * Раскладка бандла и вход Host'а. Харнесс не зашивает пути: он спрашивает сам
+ * бандл (пробой в Electron node-режиме, потому что обычный Node не читает asar)
+ * — где лежит `@deepseek-ai/dsh-desktop-host` (кандидаты: `app.asar/dsh`,
+ * `Resources/runtime`, `app.asar.unpacked/dsh`; сперва `package.json.main`
+ * пакета, потом известные пути), какая версия приложения и какая версия
+ * desktop-хоста. Так харнесс переживает переезды вроде 0.1.x → 0.2.x, где
+ * рантайм переехал в `Resources/runtime`.
+ *
+ * Порт. В 0.1.x host-энтри зашивал порт литералом (`"--port", "19387"`) — рядом
+ * с живым приложением это `EADDRINUSE`. В 0.2.x хост сам просит свободный порт
+ * (`"0"`). Харнесс читает литерал из энтри: если он фиксированный — подменяет
+ * его на `0` ESM-хуком `--import` (файл энтри не копируется, граф модулей
+ * настоящий); если порт уже динамический или литерала нет — хук ничего не
+ * трогает и падать из-за отсутствия литерала не может.
  *
  * Запуск (node вне PATH, поэтому через bin/node.sh):
  *   bin/node.sh bin/host-shutdown-check.mjs
  *   bin/node.sh bin/host-shutdown-check.mjs --scenario control --repeat 3 --verbose
+ *   bin/node.sh bin/host-shutdown-check.mjs --scenario board --settle 2500 --verbose  # дождаться самопроверки канала
  *   DSH_APP_DIR="/Applications/DeepSeek Harness.app" bin/node.sh bin/host-shutdown-check.mjs
  *
  * Коды возврата: 0 — все сценарии в бюджете (или приложения нет — skip);
  * 1 — какой-то сценарий не уложился: нет ack за 5с, процесс не вышел сам за 10с
  * или вышел с ошибкой.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -51,9 +61,29 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const PLUGIN_DIR = process.env.DSH_HARNESS_PLUGIN_DIR ?? path.join(REPO_ROOT, "dsh-kanban");
 const APP_DIR = process.env.DSH_APP_DIR ?? "/Applications/DeepSeek Harness.app";
 const RESOURCES = path.join(APP_DIR, "Contents", "Resources");
-const RUNTIME_DIR = path.join(RESOURCES, "app.asar", "dsh");
-const HOST_ENTRY = path.join(RUNTIME_DIR, "node_modules", "@deepseek-ai", "dsh-desktop-host", "lib", "index.js");
-const PRIMARY_RUNTIME = path.join(RESOURCES, "runtime", "primary-runtime");
+/** Пакет desktop-хоста внутри рантайма; версии 0.1.x и 0.2.x называют его одинаково. */
+const HOST_PACKAGE = ["@deepseek-ai", "dsh-desktop-host"];
+/** Путь входа можно подменить: так проверяется, что срыв виден по причине, а не по коду. */
+const ENTRY_OVERRIDE = process.env.DSH_HARNESS_ENTRY ?? null;
+
+/** Где искать рантайм DSH: 0.1.x — в asar, 0.2.x — плюс распакованный `Resources/runtime`. */
+function runtimeCandidates() {
+  return [
+    process.env.DSH_HARNESS_RUNTIME_DIR,
+    path.join(RESOURCES, "app.asar", "dsh"),
+    path.join(RESOURCES, "runtime"),
+    path.join(RESOURCES, "app.asar.unpacked", "dsh"),
+  ].filter((value) => typeof value === "string" && value !== "");
+}
+
+/** Где искать `primary-runtime` (набор зависимостей офисных скилов). */
+function primaryCandidates() {
+  return [
+    process.env.DSH_HARNESS_PRIMARY_RUNTIME,
+    path.join(RESOURCES, "runtime", "primary-runtime"),
+    path.join(process.env.DSH_HARNESS_RUNTIME_DIR ?? "", "..", "runtime", "primary-runtime"),
+  ].filter((value) => typeof value === "string" && value !== "");
+}
 
 /** Бюджет ack: столько DSH ждёт dispose дерева плагинов (profile-boot). */
 const ACK_BUDGET_MS = numberFromEnv("DSH_HARNESS_ACK_BUDGET_MS", 5_000);
@@ -78,7 +108,7 @@ const SCENARIO_NAMES = ["control", "board", "roots", "events"];
  * @returns `{ verbose, keep, handles, scenario, repeat, help }`.
  */
 function parseArgs(argv) {
-  const parsed = { verbose: false, keep: false, handles: false, scenario: undefined, repeat: 1, help: false };
+  const parsed = { verbose: false, keep: false, handles: false, scenario: undefined, repeat: 1, settle: 120, help: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--verbose") parsed.verbose = true;
@@ -94,6 +124,17 @@ function parseArgs(argv) {
         fail(`--scenario: неизвестный сценарий «${value}» (есть ${SCENARIO_NAMES.join(", ")})`);
       }
       parsed.scenario = value;
+      index += 1;
+    } else if (arg === "--settle") {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        fail(`--settle: ожидается целое ≥ 0 мс, получено ${value === undefined ? "пусто" : `«${value}»`}`);
+      }
+      const settle = Number(value);
+      if (!Number.isInteger(settle) || settle < 0) {
+        fail(`--settle: ожидается целое ≥ 0 мс, получено «${value}»`);
+      }
+      parsed.settle = settle;
       index += 1;
     } else if (arg === "--repeat") {
       const value = argv[index + 1];
@@ -125,6 +166,7 @@ if (cli.help) {
   console.log("использование: bin/node.sh bin/host-shutdown-check.mjs [--scenario control|board|roots|events] [--repeat N] [--handles] [--verbose] [--keep]");
   console.log(`  --scenario  сценарий (${SCENARIO_NAMES.join(", ")}), по умолчанию все четыре`);
   console.log("  --repeat    прогонов на сценарий, целое ≥ 1 (по умолчанию 1)");
+  console.log("  --settle    пауза после ready до shutdown, мс (по умолчанию 120; 2500 — дождаться самопроверки канала)");
   console.log("  --handles   снять живые handles через inspector (влияет на тайминги)");
   console.log("  --verbose   печатать IPC-сообщения и stderr хоста");
   console.log("  --keep      не удалять временный DSH_HOME");
@@ -134,6 +176,8 @@ const VERBOSE = cli.verbose;
 const KEEP = cli.keep;
 const SCENARIO_ONLY = cli.scenario;
 const REPEAT = cli.repeat;
+/** Пауза после `ready` до shutdown: даёт дожить до отложенных проверок плагина. */
+const SETTLE_MS = cli.settle;
 /** Снимок handles через inspector — только по флагу: сам inspector влияет на тайминги. */
 const WANT_HANDLES = cli.handles;
 
@@ -142,24 +186,85 @@ function numberFromEnv(name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-/** Найти приложение: бинарь Electron, asar и собранный runtime. */
-function resolveApp() {
-  const binary = fs.existsSync(path.join(APP_DIR, "Contents", "MacOS"))
-    ? fs.readdirSync(path.join(APP_DIR, "Contents", "MacOS")).map((name) => path.join(APP_DIR, "Contents", "MacOS", name)).find((file) => {
-        try {
-          return fs.statSync(file).isFile();
-        } catch {
-          return false;
-        }
-      })
-    : undefined;
-  const problems = [];
-  if (!binary) problems.push(`нет бинаря Electron в ${path.join(APP_DIR, "Contents", "MacOS")}`);
-  if (!fs.existsSync(path.join(RESOURCES, "app.asar"))) problems.push(`нет ${path.join(RESOURCES, "app.asar")}`);
-  if (!fs.existsSync(PRIMARY_RUNTIME)) problems.push(`нет primary runtime ${PRIMARY_RUNTIME}`);
-  if (!fs.existsSync(PLUGIN_DIR)) problems.push(`нет плагина ${PLUGIN_DIR}`);
-  return { binary, problems };
+/** Найти бинарь Electron приложения. */
+function resolveBinary() {
+  const binariesDir = path.join(APP_DIR, "Contents", "MacOS");
+  if (!fs.existsSync(binariesDir)) return undefined;
+  return fs
+    .readdirSync(binariesDir)
+    .map((name) => path.join(binariesDir, name))
+    .find((file) => {
+      try {
+        return fs.statSync(file).isFile();
+      } catch {
+        return false;
+      }
+    });
 }
+
+/**
+ * Спросить у самого бандла раскладку рантайма и вход Host'а.
+ *
+ * Обычный Node не читает asar, поэтому пробу выполняет Electron приложения в
+ * node-режиме: он видит и `app.asar`, и распакованные каталоги. Так харнесс не
+ * зависит от того, куда в очередной версии переехал рантайм.
+ *
+ * @param binary - путь к Electron приложения.
+ * @returns `{ runtimeDir, entry, hostVersion, release, primaryRuntime, portLiteral, seen }`
+ *   или `{ error }`, если рантайм не найден.
+ */
+function probeBundle(binary) {
+  const script = `
+import fs from "node:fs";
+const runtimes = ${JSON.stringify(runtimeCandidates())};
+const primaries = ${JSON.stringify(primaryCandidates())};
+const pkgDir = ${JSON.stringify(HOST_PACKAGE.join("/"))};
+const info = { runtimeDir: null, entry: null, hostVersion: null, release: null, primaryRuntime: null, portLiteral: null, seen: [] };
+for (const dir of runtimes) {
+  const root = dir + "/node_modules/" + pkgDir;
+  const candidates = [];
+  try {
+    const pkg = JSON.parse(fs.readFileSync(root + "/package.json", "utf8"));
+    if (typeof pkg.main === "string") candidates.push(root + "/" + pkg.main);
+    if (typeof pkg.version === "string" && info.hostVersion === null) info.hostVersion = pkg.version;
+  } catch {}
+  candidates.push(root + "/lib/index.js");
+  candidates.push(root + "/lib/cli.js");
+  const seen = candidates.filter((candidate) => { try { return fs.existsSync(candidate); } catch { return false; } });
+  info.seen.push({ dir, entry: seen[0] ?? null });
+  if (info.entry === null && seen.length > 0) {
+    info.runtimeDir = dir;
+    info.entry = seen[0];
+    try { info.release = JSON.parse(fs.readFileSync(dir + "/desktop-runtime.json", "utf8")).release?.version ?? null; } catch {}
+    try {
+      const source = fs.readFileSync(seen[0], "utf8");
+      const match = /"--port",\\s*"(\\d+)"/.exec(source);
+      info.portLiteral = match ? match[1] : null;
+    } catch {}
+  }
+}
+for (const dir of primaries) { try { if (fs.existsSync(dir)) { info.primaryRuntime = dir; break; } } catch {} }
+console.log(JSON.stringify(info));
+`;
+  const probe = spawnSync(binary, ["--expose-internals", "--input-type=module", "-e", script], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  const line = (probe.stdout ?? "").trim().split("\n").filter(Boolean).pop();
+  if (probe.error || probe.status !== 0 || line === undefined) {
+    const detail = (probe.stderr ?? "").trim().split("\n").slice(-3).join(" ");
+    return { error: `проба бандла не удалась: ${probe.error?.message ?? `код ${probe.status}: ${detail}`}` };
+  }
+  try {
+    return JSON.parse(line);
+  } catch (error) {
+    return { error: `проба бандла вернула не JSON: ${error.message}` };
+  }
+}
+
+/** Итоговая информация о бандле: заполняется один раз в main(). */
+const BUNDLE = { binary: undefined, problems: [], runtimeDir: null, entry: null, hostVersion: null, release: null, primaryRuntime: null, portLiteral: null };
 
 /**
  * Подготовить изолированное окружение сценария.
@@ -233,11 +338,12 @@ function makeBoard(dir, cards) {
 }
 
 /**
- * Хук для дочернего процесса: подменить зашитый в host-энтри порт.
+ * Хук для дочернего процесса: заменить фиксированный порт Host'а на свободный.
  *
  * Файл лежит рядом с профилем во временном каталоге и удаляется вместе с ним.
- * Литерал в энтри — `"--port", "19387"`; на `0` его подменяем, чтобы ОС выдала
- * свободный порт и харнесс не конфликтовал с живым приложением.
+ * Хук не падает, если литерала порта в энтри нет: с 0.2.x хост сам просит
+ * свободный порт (`"--port", "0"`), и подменять нечего. Порог — только
+ * фиксированный ненулевой литерал, иначе рядом с живым приложением `EADDRINUSE`.
  */
 function writePortHook(dir) {
   const file = path.join(dir, "port-hook.mjs");
@@ -248,13 +354,11 @@ const PORT = process.env.DSH_HARNESS_PORT ?? "0";
 registerHooks({
   load(url, context, nextLoad) {
     const result = nextLoad(url, context);
-    if (typeof url === "string" && url.includes("dsh-desktop-host/lib/index.js") && result.source != null) {
-      const text = String(result.source);
-      const patched = text.replace(/(\\"--port\\",\\s*)\\"19387\\"/, (match, head) => head + JSON.stringify(PORT));
-      if (patched === text) throw new Error("харнесс: в host-энтри не нашёлся \\"--port\\", \\"19387\\"");
-      return { ...result, source: patched };
-    }
-    return result;
+    if (typeof url !== "string" || !url.includes("dsh-desktop-host") || result.source == null) return result;
+    const text = String(result.source);
+    const match = /("--port",\\s*)"(\\d+)"/.exec(text);
+    if (match === null || match[2] === "0") return result;
+    return { ...result, source: text.replace(match[0], match[1] + JSON.stringify(PORT)) };
   }
 });
 `,
@@ -315,18 +419,19 @@ async function dumpHandles(inspectorUrl) {
 async function runScenario(name, options) {
   const prepared = prepareHome(options);
   const hook = writePortHook(prepared.root);
+  const entry = ENTRY_OVERRIDE ?? BUNDLE.entry;
   const startedAt = Date.now();
   const child = spawn(
-    resolveApp().binary,
+    BUNDLE.binary,
     [
       "--expose-internals",
       ...(WANT_HANDLES ? ["--inspect=127.0.0.1:0"] : []),
       "--import",
       hook,
-      HOST_ENTRY,
-      RUNTIME_DIR,
+      entry,
+      BUNDLE.runtimeDir,
       prepared.profile,
-      PRIMARY_RUNTIME
+      ...(BUNDLE.primaryRuntime === null ? [] : [BUNDLE.primaryRuntime])
     ],
     {
       cwd: prepared.profile,
@@ -334,7 +439,7 @@ async function runScenario(name, options) {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     },
   );
-  const row = { name, boards: prepared.boards.length, readyMs: null, ackMs: null, exitMs: null, code: null, signal: null, handles: null, stderr: "" };
+  const row = { name, boards: prepared.boards.length, readyMs: null, ackMs: null, exitMs: null, code: null, signal: null, handles: null, stderr: "", stdout: "" };
   let inspectorUrl = null;
   let ackAt = null;
   let exited = false;
@@ -344,9 +449,11 @@ async function runScenario(name, options) {
     const match = /Debugger listening on (ws:\/\/\S+)/.exec(chunk);
     if (match) inspectorUrl = match[1];
   });
+  // stdout хоста тоже копим: при падении до `ready` причина бывает только там
+  // (например, «dsh web: …» или стек модульного загрузчика).
   child.stdout.setEncoding("utf8");
-  child.stdout.on("data", () => {
-    /* stdout хоста не нужен: всё интересное в IPC и stderr */
+  child.stdout.on("data", (chunk) => {
+    row.stdout = (row.stdout + chunk).slice(-8_000);
   });
 
   const closed = new Promise((resolve) => {
@@ -398,7 +505,7 @@ async function runScenario(name, options) {
         );
       }
     }
-    await sleep(120);
+    await sleep(SETTLE_MS);
     child.send({ type: "shutdown" });
     // Ждём ровно бюджет выхода плюс запас: «не вышел» — это тоже результат.
     await Promise.race([closed, sleep(EXIT_BUDGET_MS + EXIT_SLACK_MS)]);
@@ -425,6 +532,46 @@ async function runScenario(name, options) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Понятная причина срыва: по stderr/stdout/fatal, а не «код 1». */
+function diagnose(row) {
+  const text = `${row.stderr ?? ""}\n${row.stdout ?? ""}`;
+  if (row.fatal) return `хост сообщил fatal: ${row.fatal}`;
+  const known = [
+    [/ERR_MODULE_NOT_FOUND|Cannot find module|MODULE_NOT_FOUND/, "модуль не найден (сломан вход или раскладка рантайма)"],
+    [/EADDRINUSE/, "порт занят (рядом работает живое приложение и порт не был подменён)"],
+    [/StartupError|required plugins did not activate|Failed plugins/, "профиль не поднялся: не активировались обязательные плагины"],
+    [/ValidationError/, "невалидный конфиг плагина в профиле"],
+    [/unbound variable/, "ошибка оболочки в скрипте набора"],
+    [/ENOENT/, "файл или каталог не найден"],
+  ];
+  for (const [pattern, reason] of known) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    // Берём не первое совпадение, а самую содержательную строку рядом: у стеков
+    // первым идёт `throw new ERR_…(`, а сообщение — строкой ниже.
+    const window = text.slice(Math.max(0, match.index - 200), match.index + 400).split("\n").map((part) => part.trim()).filter(Boolean);
+    const lines = window.filter((part) => pattern.test(part));
+    const best = lines.find((part) => /Cannot find|Error:|missing|EADDRINUSE|did not activate/i.test(part)) ?? lines.sort((a, b) => b.length - a.length)[0] ?? "";
+    return `${reason}: ${best.slice(0, 300)}`;
+  }
+  return null;
+}
+
+/** Хвост вывода: последние строки, с отступом, чтобы читалось в отчёте. */
+function tail(text, lines, indent) {
+  const parts = String(text ?? "").trim().split("\n").filter((part) => part.trim() !== "");
+  if (parts.length === 0) return `${indent}(пусто)`;
+  return parts.slice(-lines).map((part) => `${indent}${part}`).join("\n");
+}
+
+/** Полный разбор срыва: причина, stdout и stderr хоста. */
+function printFailure(row) {
+  const reason = diagnose(row);
+  console.log(`      причина: ${reason ?? "хост завершился без внятного сообщения — смотрите вывод ниже"}`);
+  console.log(`      stdout хоста:\n${tail(row.stdout, 15, "        ")}`);
+  console.log(`      stderr хоста:\n${tail(row.stderr, 20, "        ")}`);
 }
 
 /** Уложился ли сценарий в бюджеты: ack за 5с и выход за 10с. */
@@ -462,10 +609,22 @@ function printTable(rows) {
 }
 
 async function main() {
-  const app = resolveApp();
-  if (app.problems.length > 0) {
+  BUNDLE.binary = resolveBinary();
+  if (!BUNDLE.binary) {
+    BUNDLE.problems.push(`нет бинаря Electron в ${path.join(APP_DIR, "Contents", "MacOS")}`);
+  } else if (!ENTRY_OVERRIDE) {
+    const probe = probeBundle(BUNDLE.binary);
+    if (probe.error) BUNDLE.problems.push(probe.error);
+    else Object.assign(BUNDLE, probe);
+    if (!probe.error && BUNDLE.entry === null) {
+      BUNDLE.problems.push(`в бандле нет @deepseek-ai/dsh-desktop-host (искали в: ${runtimeCandidates().join(", ")})`);
+    }
+  }
+  if (!fs.existsSync(PLUGIN_DIR)) BUNDLE.problems.push(`нет плагина ${PLUGIN_DIR}`);
+
+  if (BUNDLE.problems.length > 0) {
     console.log("пропуск: приложение DSH или плагин недоступны");
-    for (const problem of app.problems) console.log(`  - ${problem}`);
+    for (const problem of BUNDLE.problems) console.log(`  - ${problem}`);
     console.log("  харнесс поднимает настоящее приложение; на другой машине или платформе он не нужен");
     return 0;
   }
@@ -483,8 +642,13 @@ async function main() {
   }
 
   console.log(`приложение: ${APP_DIR}`);
+  console.log(`версия DSH: ${BUNDLE.release ?? "неизвестна"} (desktop-host ${BUNDLE.hostVersion ?? "неизвестен"})`);
+  console.log(`рантайм: ${BUNDLE.runtimeDir}`);
+  console.log(`вход Host'а: ${ENTRY_OVERRIDE ?? BUNDLE.entry}${ENTRY_OVERRIDE === null ? "" : " (переопределён DSH_HARNESS_ENTRY)"}`);
+  console.log(`primary runtime: ${BUNDLE.primaryRuntime ?? "не найден"}`);
+  console.log(`порт Host'а: ${BUNDLE.portLiteral === null ? "динамический (литерала в энтри нет)" : BUNDLE.portLiteral === "0" ? "динамический («0» в энтри)" : `фиксированный литерал ${BUNDLE.portLiteral} — подменяем на свободный`}`);
   console.log(`плагин под тестом: ${PLUGIN_DIR}`);
-  console.log(`бюджеты: ack ≤ ${ACK_BUDGET_MS}мс, выход ≤ ${EXIT_BUDGET_MS}мс; прогонов на сценарий: ${REPEAT}`);
+  console.log(`бюджеты: ack ≤ ${ACK_BUDGET_MS}мс, выход ≤ ${EXIT_BUDGET_MS}мс; прогонов на сценарий: ${REPEAT}; пауза до shutdown: ${SETTLE_MS}мс`);
 
   const rows = [];
   for (const scenario of scenarios) {
@@ -493,15 +657,17 @@ async function main() {
       process.stdout.write(`\n${label}: `);
       const row = await runScenario(label, scenario.options);
       process.stdout.write(`ready ${row.readyMs ?? "—"}мс, ack ${row.ackMs ?? "—"}мс, exit ${row.exitMs ?? "—"}мс — ${verdict(row)}\n`);
-      if (VERBOSE || (row.handles || []).length > 0 || row.error || verdict(row) !== "ok") {
-        if (row.handles) {
-          console.log(`      live handles: ${(row.handles.handles ?? []).join(", ")}`);
-          console.log(`      live resources: ${(row.handles.resources ?? []).join(", ")}`);
-        }
+      if (row.handles) {
+        console.log(`      live handles: ${(row.handles.handles ?? []).join(", ")}`);
+        console.log(`      live resources: ${(row.handles.resources ?? []).join(", ")}`);
+      }
+      if (VERBOSE && verdict(row) === "ok") {
+        console.log(`      stderr хоста:\n${tail(row.stderr, 40, "        ")}`);
+      }
+      // Срыв старта — это отдельный разбор: причина и полный вывод Host'а.
+      if (verdict(row) !== "ok" || row.error) {
         if (row.error) console.log(`      ошибка: ${row.error}`);
-        if ((VERBOSE || verdict(row) !== "ok") && row.stderr.trim() !== "") {
-          console.log(`      stderr: ${row.stderr.trim().split("\n").slice(-6).join("\n              ")}`);
-        }
+        printFailure(row);
       }
       rows.push(row);
     }
