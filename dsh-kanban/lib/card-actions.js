@@ -237,7 +237,19 @@ export function runAssignScript({ root, args, signal, timeoutMs = SCRIPT_TIMEOUT
     execFile(
       script,
       args,
-      { cwd: String(root), timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true, signal },
+      {
+        cwd: String(root),
+        timeout: timeoutMs,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+        signal,
+        // Предсказуемая локаль для скрипта набора: bash 3.2 под multibyte-локалью
+        // неправильно разбирает `${var:+ «...»}` в `bin/task-assign.sh` (#056) и
+        // выходит с 0, ничего не сделав. Основной фикс — в #056, но канал не
+        // должен зависеть от локали вызывающего процесса (LC_ALL=C.UTF-8 не
+        // помогает: именно multibyte-режим и ломает разбор).
+        env: { ...process.env, LC_ALL: "C" },
+      },
       (error, stdout, stderr) => {
         const out = String(stdout ?? "");
         const err = String(stderr ?? "");
@@ -367,13 +379,33 @@ export function createCardActions(options) {
     }
     const run = await invoke(board.root, [cardId]);
     if (!run.ok) return result(false, status, run.message);
+    // Код возврата скрипта — ещё не доказательство асайна: #056 показал, что
+    // `bin/task-assign.sh` может вернуть 0, ничего не сделав (локаль/маскировка
+    // кода). Перечитываем снимок и проверяем фактический результат.
     const after = cardOf(board.root, cardId);
-    const nextStatus = String(after?.status ?? "todo");
-    const owner = String(after?.owner ?? "");
-    const message = owner
-      ? `карточка #${cardId} выдана: ${nextStatus}, исполнитель ${owner}`
-      : `карточка #${cardId} выдана: ${nextStatus}`;
-    return result(true, nextStatus, message, owner);
+    if (!after) {
+      return result(false, status, `bin/task-assign.sh завершился, но карточку #${cardId} не удалось перечитать — асайн не подтверждён`);
+    }
+    const nextStatus = String(after.status ?? "");
+    const owner = String(after.owner ?? "");
+    if (nextStatus !== "todo") {
+      const reason = nextStatus === status
+        ? `карточка #${cardId} осталась в ${status}`
+        : `карточка #${cardId} оказалась в статусе «${nextStatus}», ожидался todo`;
+      return result(
+        false,
+        nextStatus || status,
+        `bin/task-assign.sh завершился успешно, но ${reason} — асайн не подтверждён, проверьте bin/task-assign.sh`,
+      );
+    }
+    if (owner === "") {
+      return result(
+        false,
+        nextStatus,
+        `bin/task-assign.sh завершился успешно, но карточка #${cardId} в todo без исполнителя — асайн не подтверждён, проверьте bin/task-assign.sh`,
+      );
+    }
+    return result(true, nextStatus, `карточка #${cardId} выдана: ${nextStatus}, исполнитель ${owner}`, owner);
   };
 
   /** Возврат в очередь: строго из `todo` (карточку в работе человек не двигает). */
@@ -391,8 +423,32 @@ export function createCardActions(options) {
     }
     const run = await invoke(board.root, [cardId, "--unassign"]);
     if (!run.ok) return result(false, status, run.message);
+    // То же правило, что у асайна: `exit 0` не доказывает возврат — проверяем
+    // статус и снятые владельца с ролью по перечитанному снимку.
     const after = cardOf(board.root, cardId);
-    const nextStatus = String(after?.status ?? "backlog");
+    if (!after) {
+      return result(false, status, `bin/task-assign.sh завершился, но карточку #${cardId} не удалось перечитать — возврат не подтверждён`);
+    }
+    const nextStatus = String(after.status ?? "");
+    const owner = String(after.owner ?? "");
+    const role = String(after.role ?? "");
+    if (nextStatus !== "backlog") {
+      const reason = nextStatus === status
+        ? `карточка #${cardId} осталась в ${status}`
+        : `карточка #${cardId} оказалась в статусе «${nextStatus}», ожидался backlog`;
+      return result(
+        false,
+        nextStatus || status,
+        `bin/task-assign.sh завершился успешно, но ${reason} — возврат не подтверждён, проверьте bin/task-assign.sh`,
+      );
+    }
+    if (owner !== "" || role !== "") {
+      return result(
+        false,
+        nextStatus,
+        `bin/task-assign.sh завершился успешно, но у карточки #${cardId} в backlog остались ${[owner ? "владелец" : "", role ? "роль" : ""].filter(Boolean).join(" и ")} — возврат не подтверждён, проверьте bin/task-assign.sh`,
+      );
+    }
     return result(true, nextStatus, `карточка #${cardId} вернулась в backlog`);
   };
 
