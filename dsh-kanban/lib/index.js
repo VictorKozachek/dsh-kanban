@@ -398,31 +398,6 @@ function noticeText(item) {
   return `${item.text}\n\nКарточка в ${dir} — работай там: команды выполняй из этого каталога.`;
 }
 
-/** Отправить один наряд в сессию; `true` — принят. */
-async function deliver(ctx, item) {
-  const service = ctx.sessionController;
-  if (!service || typeof service.prompt !== "function") {
-    log(ctx, "warn", "нет сервиса sessionController — наряд не отправлен");
-    return false;
-  }
-  try {
-    await service.prompt(
-      {
-        requestId: randomUUID(),
-        sessionId: item.sessionId,
-        mode: "queue",
-        content: [{ type: "text", text: noticeText(item) }],
-      },
-      new AbortController().signal,
-    );
-    log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) → ${item.sessionId}`);
-    return true;
-  } catch (error) {
-    log(ctx, "warn", `наряд по #${item.cardId} не доставлен (${item.sessionId}): ${error?.message ?? error}`);
-    return false;
-  }
-}
-
 /** Роли доски: id пресета совпадает с именем роли, но допускаем префикс `preset-`. */
 const ROLES = ["dispatcher", "worker", "reviewer", "verifier"];
 
@@ -470,16 +445,90 @@ export function apply(ctx, config = {}) {
       return null;
     };
 
+    /**
+     * Состояние жизни плагина. `disposed` — единый флаг: выставляется в начале
+     * dispose, после него никакие обработчики (события файловой системы, тики,
+     * доставки, асайны из GUI) не создают новых таймеров, наблюдателей и
+     * процессов, а уже созданные закрываются. Обработчик dispose регистрируется
+     * здесь, до раннего выхода «нет досок»: служба канала и проба живут и без
+     * сторожа, и они тоже должны сниматься.
+     */
+    let disposed = false;
+    /** Жизнь плагина: по dispose отменяет дочерние процессы bin/task-assign.sh. */
+    const lifetime = new AbortController();
+    /** In-flight доставки: у каждой свой signal, по dispose все отменяются. */
+    const controllers = new Set();
+    /** Все живые fs.watch всех досок: закрываются на dispose. */
+    const watchers = [];
+    /** Актуальные таймеры (стартовые обходы доски, debounce): снимаются на dispose. */
+    const timers = new Set();
+    /** Таймер самопроверки канала. */
+    let channelProbe = null;
+    /** Регистрация службы канала: снимаем её сами, не надеясь на порядок unload. */
+    let channelRegistration = null;
+
+    ctx.on?.("dispose", () => {
+      // Идемпотентность: повторный dispose (cordis может позвать дважды) ничего
+      // не ломает, а после флага ни один обработчик не воскресит ресурсы.
+      if (disposed) return;
+      disposed = true;
+
+      // 1. Отменяем всё, что ещё может работать: дочерние процессы канала и
+      //    in-flight наряды. prompt получает aborted-сигнал и снимает сообщение
+      //    из очереди сессии.
+      try {
+        lifetime.abort();
+      } catch {
+        /* уже отменён */
+      }
+      for (const controller of controllers) {
+        try {
+          controller.abort();
+        } catch {
+          /* уже отменён */
+        }
+      }
+      controllers.clear();
+
+      // 2. Закрываем наблюдателей и снимаем таймеры: после dispose новых не будет.
+      for (const watcher of watchers) {
+        try {
+          watcher.close();
+        } catch {
+          /* уже закрыт */
+        }
+      }
+      watchers.length = 0;
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+      if (channelProbe !== null) {
+        clearTimeout(channelProbe);
+        channelProbe = null;
+      }
+
+      // 3. Снимаем службу канала. cordis снимает службу вместе с файбером
+      //    плагина, но явный disposer делает это предсказуемо и идемпотентно.
+      try {
+        void channelRegistration?.dispose?.();
+      } catch (error) {
+        log(ctx, "warn", `канал асайна не снялся: ${error?.message ?? error}`);
+      }
+      channelRegistration = null;
+    });
+
     // Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo →
     // backlog` из GUI. Регистрируется даже без сторожевых `boards`: без них
     // канал просто отказывает «сессия не привязана к доске», и это понятнее
     // ошибки «endpoint не найден» на стороне клиента.
     try {
-      registerCardActionsService(ctx, {
+      channelRegistration = registerCardActionsService(ctx, {
         boards: watchedBoards(),
         snapshot: readSnapshot,
         resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),
         runScript: runAssignScript,
+        // Сигнал жизни плагина: по dispose начатые асайны отменяются вместе с
+        // дочерним `bin/task-assign.sh`, а новые не стартуют.
+        signal: lifetime.signal,
         log: (level, message) => log(ctx, level, message),
       });
     } catch (error) {
@@ -499,26 +548,67 @@ export function apply(ctx, config = {}) {
     const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
 
     // Самопроверка канала — после стартовой паузы, когда gateway уже смонтирован
-    // (синхронная проба в apply давала ложный «не объявил»). Таймер снимаем по
-    // dispose, чтобы он не выстрелил после выгрузки плагина.
-    const channelProbe = setTimeout(() => {
+    // (синхронная проба в apply давала ложный «не объявил»). Таймер снимается в
+    // общем dispose-обработчике, поэтому после выгрузки проба не стреляет.
+    channelProbe = setTimeout(() => {
+      channelProbe = null;
+      if (disposed) return;
       try {
         probeCardChannel(ctx);
       } catch (error) {
         log(ctx, "warn", `канал асайна: самопроверка упала: ${error?.message ?? error}`);
       }
     }, catchUpMs);
-    ctx.on?.("dispose", () => clearTimeout(channelProbe));
 
     if (boards.length === 0 && roots.length === 0) {
       log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards и roots");
       return;
     }
 
-    const watchers = [];
-    const timers = [];
     /** Повторный обход досок: нужен, когда роль появляется позже карточки. */
     const reannounce = [];
+
+    /**
+     * Отправить один наряд в сессию; `true` — принят.
+     *
+     * У каждой доставки свой `AbortController`: контроллер лежит в наборе
+     * `controllers` и снимается по завершении, а по dispose все активные
+     * отменяются — `sessionController.prompt` получает aborted-сигнал, и сессия
+     * снимает сообщение из очереди. После dispose новые доставки не стартуют.
+     */
+    const deliver = async (item) => {
+      if (disposed) return false;
+      const service = ctx.sessionController;
+      if (!service || typeof service.prompt !== "function") {
+        log(ctx, "warn", "нет сервиса sessionController — наряд не отправлен");
+        return false;
+      }
+      const controller = new AbortController();
+      controllers.add(controller);
+      try {
+        await service.prompt(
+          {
+            requestId: randomUUID(),
+            sessionId: item.sessionId,
+            mode: "queue",
+            content: [{ type: "text", text: noticeText(item) }],
+          },
+          controller.signal,
+        );
+        if (disposed) return false;
+        log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) → ${item.sessionId}`);
+        return true;
+      } catch (error) {
+        if (controller.signal.aborted || disposed) {
+          log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) отменён: плагин выгружается`);
+          return false;
+        }
+        log(ctx, "warn", `наряд по #${item.cardId} не доставлен (${item.sessionId}): ${error?.message ?? error}`);
+        return false;
+      } finally {
+        controllers.delete(controller);
+      }
+    };
 
     for (const board of watchedBoards()) {
       const root = String(board);
@@ -554,42 +644,50 @@ export function apply(ctx, config = {}) {
       // один и тот же наряд дважды.
       const inFlight = new Set();
       const deliverOnce = (key, item) => {
+        if (disposed) return;
         if (state[key] || inFlight.has(key)) return;
         inFlight.add(key);
         void (async () => {
-          // Граница доски: наряд уходит только сессии, чей каталог внутри этого корня.
-          let cwd = null;
           try {
-            cwd = await sessionCwdFromContext(ctx, item.sessionId);
-          } catch {
-            cwd = null;
-          }
-          if (cwd !== null && boardRootOf(cwd) !== path.resolve(root)) {
-            log(ctx, "warn", `наряд по #${item.cardId} пропущен: сессия ${item.sessionId} вне доски ${root}`);
-            return;
-          }
-          const accepted = await deliver(ctx, item).catch(() => false);
-          inFlight.delete(key);
-          if (!accepted) {
-            // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
-            // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
-            pending[key] = {
-              cardId: item.cardId,
-              status: item.status,
-              sessionId: item.sessionId,
-              text: item.text,
-              // Рабочее дерево — часть текста наряда, поэтому едет вместе с ним.
-              worktree: item.worktree ?? "",
-              at: new Date().toISOString(),
-            };
-            saveState(pendingFile, pending);
-            return;
-          }
-          state[key] = new Date().toISOString();
-          saveState(stateFile, state);
-          if (pending[key]) {
-            delete pending[key];
-            saveState(pendingFile, pending);
+            // Граница доски: наряд уходит только сессии, чей каталог внутри этого корня.
+            let cwd = null;
+            try {
+              cwd = await sessionCwdFromContext(ctx, item.sessionId);
+            } catch {
+              cwd = null;
+            }
+            if (disposed) return;
+            if (cwd !== null && boardRootOf(cwd) !== path.resolve(root)) {
+              log(ctx, "warn", `наряд по #${item.cardId} пропущен: сессия ${item.sessionId} вне доски ${root}`);
+              return;
+            }
+            const accepted = await deliver(item).catch(() => false);
+            // По dispose состояние на диске не трогаем: стартовый обход следующего
+            // запуска объявит всё, что ещё ждёт роль, — потерять наряд нечего.
+            if (disposed) return;
+            if (!accepted) {
+              // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
+              // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
+              pending[key] = {
+                cardId: item.cardId,
+                status: item.status,
+                sessionId: item.sessionId,
+                text: item.text,
+                // Рабочее дерево — часть текста наряда, поэтому едет вместе с ним.
+                worktree: item.worktree ?? "",
+                at: new Date().toISOString(),
+              };
+              saveState(pendingFile, pending);
+              return;
+            }
+            state[key] = new Date().toISOString();
+            saveState(stateFile, state);
+            if (pending[key]) {
+              delete pending[key];
+              saveState(pendingFile, pending);
+            }
+          } finally {
+            inFlight.delete(key);
           }
         })();
       };
@@ -602,6 +700,7 @@ export function apply(ctx, config = {}) {
        * разбудит оркестратора.
        */
       const announceRefill = (next) => {
+        if (disposed) return;
         let plan;
         try {
           plan = planRefillNotice(next, { minTodo: readMinTodo(boardFile), dispatcher: boardRoles.dispatcher, board: root });
@@ -630,6 +729,7 @@ export function apply(ctx, config = {}) {
       };
 
       const announce = (before, next) => {
+        if (disposed) return;
         let notices = [];
         try {
           notices = planNotices(before, next, { ...boardRoles, board: root });
@@ -658,35 +758,39 @@ export function apply(ctx, config = {}) {
 
       // 1. Что уже ждёт роль: карточка могла зависнуть в in-review/testing/ready
       //    до запуска сторожа. Повторов не будет — их гасит файл состояния.
-      timers.push(
-        setTimeout(() => {
-          try {
-            announce(new Map(), previous);
-          } catch (error) {
-            log(ctx, "warn", `не разобрал стартовое состояние доски: ${error?.message ?? error}`);
+      const startPass = setTimeout(() => {
+        timers.delete(startPass);
+        if (disposed) return;
+        try {
+          announce(new Map(), previous);
+        } catch (error) {
+          log(ctx, "warn", `не разобрал стартовое состояние доски: ${error?.message ?? error}`);
+        }
+        // Прошлый запуск не смог доставить наряд — пробуем снова. Идём через тот
+        // же deliverOnce: если объявление выше уже взяло наряд в работу, повтор
+        // не отправит второе сообщение.
+        for (const [key, item] of Object.entries(pending)) {
+          const card = previous.get(item.cardId);
+          // След мог устареть: карточка уехала дальше или её уже нет на доске.
+          // Такой наряд отправлять нечего — молча снимаем, иначе он висел бы в
+          // файле и повторялся при каждом старте.
+          if (!card || card.status !== item.status) {
+            delete pending[key];
+            saveState(pendingFile, pending);
+            continue;
           }
-          // Прошлый запуск не смог доставить наряд — пробуем снова. Идём через тот
-          // же deliverOnce: если объявление выше уже взяло наряд в работу, повтор
-          // не отправит второе сообщение.
-          for (const [key, item] of Object.entries(pending)) {
-            const card = previous.get(item.cardId);
-            // След мог устареть: карточка уехала дальше или её уже нет на доске.
-            // Такой наряд отправлять нечего — молча снимаем, иначе он висел бы в
-            // файле и повторялся при каждом старте.
-            if (!card || card.status !== item.status) {
-              delete pending[key];
-              saveState(pendingFile, pending);
-              continue;
-            }
-            deliverOnce(key, item);
-          }
-        }, catchUpMs),
-      );
+          deliverOnce(key, item);
+        }
+      }, catchUpMs);
+      timers.add(startPass);
 
       // Тот же обход с пустым «предыдущим»: зовём, когда роль появилась позже
       // карточки, которая её ждёт. Повторов не будет — доставленные наряды лежат
       // в файле состояния по ключу id:status:updated.
-      reannounce.push(() => announce(new Map(), previous));
+      reannounce.push(() => {
+        if (disposed) return;
+        announce(new Map(), previous);
+      });
 
       // 2. Переходы: следим за каталогами карточек и разбираем изменения.
       //    Кроме основной доски — доски рабочих деревьев и сами `worktrees/`:
@@ -696,6 +800,7 @@ export function apply(ctx, config = {}) {
       const watched = new Map();
       const tick = () => {
         timer = null;
+        if (disposed) return;
         const next = readSnapshot(root);
         if (next === null) return;
         const before = previous;
@@ -704,12 +809,24 @@ export function apply(ctx, config = {}) {
         syncWatch();
       };
       const onEvent = () => {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(tick, debounceMs);
-        // Таймер паузы тоже отслеживаем: иначе после dispose он выстрелит ещё раз.
-        timers.push(timer);
+        if (disposed) return;
+        // На доску — один актуальный таймер паузы: старый снимаем и убираем из
+        // набора, иначе таймеры копились бы без предела и держали процесс.
+        if (timer !== null) {
+          clearTimeout(timer);
+          timers.delete(timer);
+          timer = null;
+        }
+        const handle = setTimeout(() => {
+          timers.delete(handle);
+          timer = null;
+          tick();
+        }, debounceMs);
+        timer = handle;
+        timers.add(handle);
       };
       const syncWatch = () => {
+        if (disposed) return;
         const dirs = watchDirs(root);
         for (const [dir, watcher] of watched) {
           if (dirs.has(dir)) continue;
@@ -749,6 +866,7 @@ export function apply(ctx, config = {}) {
       saveState(path.join(String(root), ".kanban", ROLES_FILE), auto);
     };
     ctx.on?.("agent-preset/selected", (sessionId, agentPreset) => {
+      if (disposed) return;
       const role = roleOfPreset(agentPreset);
       if (!role || configuredRoles[role]) return;
       const id = String(sessionId ?? "");
@@ -774,6 +892,7 @@ export function apply(ctx, config = {}) {
         } catch {
           cwd = null;
         }
+        if (disposed) return;
         if (cwd === null) return;
         const root = boardRootOf(cwd);
         if (root === null) {
@@ -805,16 +924,6 @@ export function apply(ctx, config = {}) {
     });
 
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${[...rolesByRoot.values()].reduce((n, item) => n + Object.keys(item).length, 0)}`);
-    ctx.on?.("dispose", () => {
-      for (const watcher of watchers) {
-        try {
-          watcher.close();
-        } catch {
-          /* уже закрыт */
-        }
-      }
-      for (const timer of timers) clearTimeout(timer);
-    });
   } catch (error) {
     log(ctx, "warn", `сторож доски не запустился: ${error?.message ?? error}`);
   }
