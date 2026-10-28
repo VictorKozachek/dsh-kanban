@@ -29,6 +29,7 @@
 | `dsh-kanban/test/delivery.test.mjs` | Тесты доставки наряда с поддельным сервисом сессий |
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
 | `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
+| `dsh-kanban/test/shutdown.test.mjs` | Регрессия dispose: после выгрузки нет живых `fs.watch`/таймеров, in-flight наряд и дочерний `task-assign.sh` отменяются, повторный dispose безопасен, бюджет 200 мс на десятках досок |
 | `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
 | `bin/test.sh` | Прогнать все проверки набора |
 | `.kanban/tasks/` | Карточки задач: один `<id>.md` на задачу |
