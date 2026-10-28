@@ -94,6 +94,13 @@ function makeCtx({ sessionCwd, prompt, logs = [] } = {}) {
   const handlers = new Map();
   const services = new Map();
   const prompts = [];
+  /**
+   * Выгрузка, как её делает cordis: при unload файбера вызываются disposer'ы
+   * эффектов (в обратном порядке регистрации), а событие `dispose` при shutdown
+   * DSH не эмитит вовсе. Тест обязан гонять именно этот путь — иначе мёртвый
+   * cleanup проходит зелёным (ровно эта дыра нашлась в #052).
+   */
+  const effects = [];
   const promptImpl =
     prompt ??
     (async () => {
@@ -110,6 +117,11 @@ function makeCtx({ sessionCwd, prompt, logs = [] } = {}) {
       handlers.set(name, list);
     },
     pick: (name) => () => (handlers.get(name) ?? []).forEach((handler) => handler()),
+    effect: (callback, label) => {
+      const dispose = callback();
+      if (typeof dispose === "function") effects.push({ dispose, label });
+      return dispose;
+    },
     provide: (name, value) => {
       services.set(name, value);
       return async () => services.delete(name);
@@ -132,7 +144,14 @@ function makeCtx({ sessionCwd, prompt, logs = [] } = {}) {
       },
     },
   };
-  return { ctx, prompts, services };
+  // Эффекты доступны и через ctx: так тест может звать unload(ctx) как cordis.
+  ctx.effects = effects;
+  return { ctx, prompts, services, effects };
+}
+
+/** Выгрузить плагин так, как это делает cordis: снять эффекты в обратном порядке. */
+function unload(ctx) {
+  for (const effect of [...ctx.effects].reverse()) effect.dispose();
 }
 
 console.log("== dispose: нет живых наблюдателей и таймеров, повтор безопасен");
@@ -150,9 +169,13 @@ await check("30 досок: dispose закрывает все FSWatcher, сни�
   const { ctx } = makeCtx({ sessionCwd: boards[0] });
   apply(ctx, { boards, roles: { reviewer: "sess-reviewer" }, catchUpMs: 40, debounceMs: 10 });
   assert.ok(activeWatchers().length > 0, "сторож не поднял наблюдение — стенд не проверяет dispose");
+  assert.ok(
+    ctx.effects.some((effect) => typeof effect.dispose === "function"),
+    "cleanup не зарегистрирован через ctx.effect: при shutdown cordis вызовет только его",
+  );
   await sleep(60);
   const started = performance.now();
-  ctx.pick("dispose")();
+  unload(ctx);
   const elapsed = performance.now() - started;
   assert.ok(elapsed < 200, `dispose занял ${elapsed.toFixed(1)} мс (бюджет 200)`);
   const closed = await waitFor(() => activeWatchers().length === 0, 1000);
@@ -168,7 +191,7 @@ await check("событие файловой системы после dispose �
   assert.ok(await waitFor(() => fs.existsSync(stateFile(board))), "стартовый обход не записал state");
   const before = fs.readFileSync(stateFile(board), "utf8");
   const promptsBefore = prompts.length;
-  ctx.pick("dispose")();
+  unload(ctx);
   assert.ok(await waitFor(() => activeWatchers().length === 0, 1000), "наблюдатель не закрылся");
   // Событие после dispose: карточка появляется, каталог «меняется».
   writeCard(board, "003", "in-review", { owner: "sess-worker" });
@@ -183,9 +206,10 @@ await check("повторный dispose безопасен и снимает с�
   const { ctx, services } = makeCtx({ sessionCwd: board });
   apply(ctx, { boards: [board], catchUpMs: 10 });
   assert.ok(ctx.get(SERVICE_KEY), "служба канала не зарегистрирована");
-  const dispose = ctx.pick("dispose");
-  dispose();
-  dispose();
+  const effect = ctx.effects.find((item) => item.label === "dsh-kanban: dispose") ?? ctx.effects.at(-1);
+  assert.ok(effect, "cleanup не зарегистрирован как effect");
+  effect.dispose();
+  effect.dispose();
   assert.equal(ctx.get(SERVICE_KEY), undefined, "служба канала не снята");
   assert.equal(services.size, 0, "в контексте остались службы плагина");
   // Закрытый fs.watch исчезает из списка handles не мгновенно (платформа
@@ -211,7 +235,7 @@ await check("in-flight prompt получает abort, новых доставо�
   apply(ctx, { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 20, debounceMs: 10 });
   assert.ok(await waitFor(() => capturedSignal !== null), "доставка не началась");
   assert.equal(capturedSignal.aborted, false, "сигнал не должен быть отменён до dispose");
-  ctx.pick("dispose")();
+  unload(ctx);
   assert.equal(capturedSignal.aborted, true, "prompt не получил aborted-сигнал");
   await sleep(120);
   assert.equal(prompts.length, 1, "после dispose началась новая доставка");
@@ -243,7 +267,7 @@ await check("дочерний bin/task-assign.sh отменяется по dispo
   });
   assert.ok(await waitFor(() => fs.existsSync(marker), 2000), "дочерний скрипт не запустился");
   const started = performance.now();
-  ctx.pick("dispose")();
+  unload(ctx);
   assert.ok(await waitFor(() => outcome !== null, 1500), "асайн не завершился после dispose");
   const elapsed = performance.now() - started;
   assert.equal(outcome.ok, false, `асайн не отменён: ${JSON.stringify(outcome)}`);
