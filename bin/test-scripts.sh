@@ -849,6 +849,101 @@ if [[ -x /bin/bash ]]; then
   fi
 fi
 
+echo "== локаль C.UTF-8: мультибайт рядом с переменной и код возврата"
+
+# Класс бага #056: в локали C.UTF-8 системный bash 3.2 съедает мультибайт,
+# стоящий сразу после небраced-переменной (пример: "$title" и сразу «), и
+# падает с unbound variable. Сканируем статически: такого соседства в bin/*.sh
+# быть не должно. Образец намеренно НЕ пишем в комментарии — иначе сканер
+# поймает сам себя.
+if LC_ALL=C grep -nE '\$([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])[^ -~]' "$ROOT"/bin/*.sh >"$WORK/locale-scan" 2>&1; then
+  fail "мультибайт сразу после небраced-переменной: $(tr '\n' ' ' < "$WORK/locale-scan")"
+else
+  pass "в bin/*.sh нет мультибайта сразу после небраced-переменной"
+fi
+
+# Один и тот же стенд прогоняем под C и C.UTF-8: код и вывод должны совпадать.
+# До #056 под C.UTF-8 асайн падал на подписи карточки — и возвращал 0, потому
+# что EXIT-ловушка затирала статус.
+locale_repo="$WORK/assign-locale"
+make_repo "$locale_repo"
+mkdir -p "$locale_repo/.kanban/tasks"
+printf '["w1","w2"]\n' > "$locale_repo/.kanban/.workers.json"
+write_card "$locale_repo/.kanban/tasks/080.md" 080 backlog ""
+# Название с «ёлочками»: подпись карточки собирается из заголовка, и раньше
+# именно на ней ломался парсер.
+awk 'BEGIN { done = 0 }
+     done == 0 && /^title:/ { print "title: Задача «на выдачу»"; done = 1; next }
+     { print }' "$locale_repo/.kanban/tasks/080.md" > "$locale_repo/.kanban/tasks/080.md.tmp"
+mv "$locale_repo/.kanban/tasks/080.md.tmp" "$locale_repo/.kanban/tasks/080.md"
+write_card "$locale_repo/.kanban/tasks/081.md" 081 todo ""
+locale_busy="$WORK/assign-locale-busy"
+make_repo "$locale_busy"
+mkdir -p "$locale_busy/.kanban/tasks"
+printf '["w1"]\n' > "$locale_busy/.kanban/.workers.json"
+write_card "$locale_busy/.kanban/tasks/001.md" 001 in-progress w1
+write_card "$locale_busy/.kanban/tasks/082.md" 082 backlog ""
+
+locale_run() { # имя-варианта каталог локалl id [аргументы…]
+  local label="$1" repo="$2" loc="$3" id="$4"
+  shift 4
+  local code=0
+  ( cd "$repo" && LC_ALL="$loc" ./bin/task-assign.sh "$id" "$@" >"$WORK/locale-$label" 2>&1 ) || code=$?
+  printf '%s' "$code"
+}
+
+locale_case() { # описание id ожидаемый-код каталог [аргументы…]
+  local what="$1" id="$2" want="$3" repo="$4"
+  shift 4
+  local code_c code_utf
+  code_c="$(locale_run "c-$id" "$repo" C "$id" "$@")"
+  code_utf="$(locale_run "utf-$id" "$repo" C.UTF-8 "$id" "$@")"
+  if [[ "$code_c" == "$want" ]] && [[ "$code_utf" == "$want" ]]; then
+    pass "$what: код $want под C и C.UTF-8"
+  else
+    fail "$what: под C код $code_c, под C.UTF-8 код $code_utf (ждали $want)"
+  fi
+  if cmp -s "$WORK/locale-c-$id" "$WORK/locale-utf-$id"; then
+    pass "$what: вывод под C и C.UTF-8 совпадает"
+  else
+    fail "$what: вывод под локалями разный: $(diff "$WORK/locale-c-$id" "$WORK/locale-utf-$id" 2>&1 | head -4 | tr '\n' ' ')"
+  fi
+}
+
+locale_case "асайн --dry-run" 080 0 "$locale_repo" --dry-run
+locale_case "карточка не в backlog" 081 3 "$locale_repo"
+locale_case "несуществующая карточка" 999 3 "$locale_repo"
+locale_case "все заняты" 082 4 "$locale_busy"
+
+# Подпись карточки не потерялась: заголовок с «ёлочками» доходит до плана.
+if grep -q "«на выдачу»" "$WORK/locale-utf-080"; then
+  pass "подпись карточки с мультибайтом печатается под C.UTF-8"
+else
+  fail "подпись карточки под C.UTF-8: $(cat "$WORK/locale-utf-080" 2>/dev/null | tr '\n' ' ')"
+fi
+
+# Остальные скрипты набора под UTF-8 локалью: не падают и не врут кодом.
+locale_ok() { # описание ожидаемый-код команда…
+  local what="$1" want="$2"
+  shift 2
+  local code=0
+  "$@" >"$WORK/locale-misc" 2>&1 || code=$?
+  if [[ "$code" == "$want" ]]; then
+    pass "$what под C.UTF-8: код $want"
+  else
+    fail "$what под C.UTF-8: код $code, $(head -3 "$WORK/locale-misc" 2>/dev/null | tr '\n' ' ')"
+  fi
+}
+
+locale_ok "backlog-fill --dry-run" 0 env LC_ALL=C.UTF-8 bash -c 'cd "$1" && ./bin/backlog-fill.sh --dry-run' _ "$locale_repo"
+locale_ok "backlog-fill с битым --min" 2 env LC_ALL=C.UTF-8 bash -c 'cd "$1" && ./bin/backlog-fill.sh --min abc' _ "$locale_repo"
+locale_ok "task-assign --help" 0 env LC_ALL=C.UTF-8 "$ROOT/bin/task-assign.sh" --help
+locale_ok "task-move --help" 0 env LC_ALL=C.UTF-8 "$ROOT/bin/task-move.sh" --help
+locale_ok "task-new --help" 0 env LC_ALL=C.UTF-8 "$ROOT/bin/task-new.sh" --help
+if [[ -x "$ROOT/bin/node.sh" ]]; then
+  locale_ok "board-status" 0 env LC_ALL=C.UTF-8 bash -c 'cd "$1" && ./bin/board-status.sh' _ "$ROOT"
+fi
+
 echo "== .gitignore закрывает служебные файлы доски"
 for path in .kanban/.watcher-state.json .kanban/.watcher-roles.json .kanban/.watcher-pending.json .kanban/.workers.json .kanban/worktrees.json worktrees/007; do
   if git -C "$ROOT" check-ignore -q "$path"; then

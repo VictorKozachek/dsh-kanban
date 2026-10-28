@@ -206,9 +206,18 @@ cleanup() {
   [[ -n "${LOAD_POOL_FILE:-}" ]] && rm -f "$LOAD_POOL_FILE"
   [[ -n "${LOAD_ROWS_FILE:-}" ]] && rm -f "$LOAD_ROWS_FILE"
   [[ -n "${LOADS_FILE:-}" ]] && rm -f "$LOADS_FILE"
-  # Код возврата скрипта не должен зависеть от уборки: последняя проверка выше
-  # бывает ложной (файла не было), а EXIT-ловушка вернула бы 1.
+  # Свой статус уборки не важен: код возврата скрипта сохраняет on_exit.
   return 0
+}
+
+# EXIT-ловушка не должна затирать код возврата. Раньше ловушка звала cleanup
+# напрямую, и `return 0` в нём превращал любой сбой в успех: GUI показывал
+# «перенесено», а карточка не двигалась (#056). Теперь статус запоминается ДО
+# уборки и возвращается после неё.
+on_exit() {
+  local code=$?
+  cleanup || true
+  exit "$code"
 }
 
 # Где лежит карточка — для текста плана.
@@ -345,7 +354,7 @@ if [[ ! -d "$TASKS_DIR" ]]; then
 fi
 
 SNAPSHOT_FILE=""
-trap cleanup EXIT
+trap on_exit EXIT
 build_snapshot
 
 card_file=""
@@ -367,7 +376,13 @@ status="$(card_status "$card_file")"
 title="$(card_field "$card_file" title)"
 owner="$(card_field "$card_file" owner)"
 where="$(card_where "$card_file" "$card_from_tree")"
-label="#$ID${title:+ «$title»}"
+# Подпись карточки: «…#ID «название»». Собираем через printf, а не одной
+# строкой: в локали C.UTF-8 системный bash 3.2 съедает мультибайт, стоящий сразу
+# после `$title`, и падает с `title?: unbound variable` (#056).
+label="#$ID"
+if [[ -n "$title" ]]; then
+  label="$(printf '%s «%s»' "$label" "$title")"
+fi
 
 if (( UNASSIGN == 1 )); then
   if [[ "$status" != "todo" ]]; then
