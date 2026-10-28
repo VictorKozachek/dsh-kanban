@@ -249,6 +249,12 @@ export function runAssignScript({ root, args, signal, timeoutMs = SCRIPT_TIMEOUT
           resolve({ ok: false, code: "missing", stdout: out, stderr: err });
           return;
         }
+        // Плагин выгружается: execFile убивает ребёнка по сигналу, и это не
+        // «скрипт упал», а отмена — вызывающий должен отличить одно от другого.
+        if (error.name === "AbortError" || error.code === "ABORT_ERR" || signal?.aborted) {
+          resolve({ ok: false, code: "aborted", stdout: out, stderr: err });
+          return;
+        }
         const code = typeof error.code === "number" ? error.code : "failed";
         resolve({ ok: false, code, stdout: out, stderr: err });
       },
@@ -273,6 +279,11 @@ export function createCardActions(options) {
   const resolveSessionCwd = options?.resolveSessionCwd;
   const runScript = options?.runScript ?? runAssignScript;
   const log = typeof options?.log === "function" ? options.log : () => {};
+  // Сигнал жизни плагина: по dispose начатый `bin/task-assign.sh` (и его дети)
+  // отменяется сигналом, а новые асайны не стартуют вовсе.
+  const signal = options?.signal ?? null;
+  const cancelled = () => Boolean(signal?.aborted);
+  const CANCELLED_MESSAGE = "канал асайна отменён: плагин выгружается";
 
   /** Очередь: два асайна одновременно не должны выбрать одного исполнителя. */
   let queue = Promise.resolve();
@@ -317,11 +328,17 @@ export function createCardActions(options) {
 
   /** Запуск скрипта с переводом кодов и текста отказа в человеческое сообщение. */
   const invoke = async (root, args) => {
+    if (cancelled()) return { ok: false, message: CANCELLED_MESSAGE };
     let outcome;
     try {
-      outcome = await runScript({ root, args });
+      outcome = await runScript({ root, args, signal: signal ?? undefined });
     } catch (error) {
+      if (cancelled()) return { ok: false, message: CANCELLED_MESSAGE };
       return { ok: false, message: `канал асайна упал: ${shortText(error?.message ?? error)}` };
+    }
+    // Отмена по dispose: ни отменять результат, ни писать состояние не нужно.
+    if (cancelled() || outcome?.code === "aborted") {
+      return { ok: false, message: CANCELLED_MESSAGE };
     }
     if (outcome?.ok) return { ok: true };
     if (outcome?.code === "missing") {

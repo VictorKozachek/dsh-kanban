@@ -29,6 +29,7 @@
 | `dsh-kanban/test/delivery.test.mjs` | Тесты доставки наряда с поддельным сервисом сессий |
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
 | `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
+| `dsh-kanban/test/shutdown.test.mjs` | Регрессия dispose: после выгрузки нет живых `fs.watch`/таймеров, in-flight наряд и дочерний `task-assign.sh` отменяются, повторный dispose безопасен, бюджет 200 мс на десятках досок |
 | `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
 | `bin/test.sh` | Прогнать все проверки набора |
 | `.kanban/tasks/` | Карточки задач: один `<id>.md` на задачу |
@@ -40,6 +41,7 @@
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |
 | `bin/backlog-fill.sh` | Пополнить `todo` из `backlog` до `minTodo` и асайнить свободным исполнителям (`--dry-run`, `--min N`) |
 | `bin/task-assign.sh` | Асайн конкретной карточки самому свободному исполнителю (backlog → todo) и возврат в очередь (`--unassign`, `--dry-run`) |
+| `bin/host-shutdown-check.mjs` | Харнесс реального graceful shutdown Host-процесса DSH: сценарии control/board/roots/events, замеры ack и выхода (диагностика, не в bin/test.sh) |
 | `bin/spec-new.sh` | Завести спецификацию `.kanban/specs/<NNN>.md` по шаблону (сквозной номер) |
 | `.gitignore` | Служебные файлы доски (`.kanban/.watcher-*.json`, `.kanban/.workers.json`, `.kanban/worktrees.json`, `worktrees/`) — им не место в git |
 | `bin/task-commit.sh` | Путь в `merged`: слияние ветки задачи с сообщением по правилу, а для работы, которая уже в `main`, — `--no-merge --reason` (пуш — руками) |
