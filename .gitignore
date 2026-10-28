@@ -8,3 +8,6 @@
 # Рабочие деревья задач лежат внутри проекта (bin/task-new.sh).
 worktrees/
 .worktrees/
+
+# Python-кэш (создают painter/mockup-проверки)
+__pycache__/

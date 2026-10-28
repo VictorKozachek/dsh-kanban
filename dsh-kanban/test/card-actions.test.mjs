@@ -260,6 +260,40 @@ await checkAsync("скрипта асайна ещё нет — понятный
   assert.equal(result.ok, false);
   assert.match(result.message, /bin\/task-assign\.sh/);
 });
+await checkAsync("скрипт вернул 0, но карточка не изменилась — отказ, а не успех", async () => {
+  const root = makeBoard("assign-noop");
+  const actions = makeActions(root, {
+    runScript: async () => {
+      calls.push({ root, args: ["047"] });
+      return { ok: true, code: 0, stdout: "выдано: #047 → w1\n", stderr: "" };
+    },
+  });
+  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  assert.equal(result.ok, false, `канал отрапортовал успех без изменений: ${JSON.stringify(result)}`);
+  assert.equal(result.status, "backlog");
+  assert.match(result.message, /осталась в backlog/);
+  assert.match(result.message, /не подтверждён/);
+  assert.match(result.message, /bin\/task-assign\.sh/);
+  // Состояние не испорчено: карточка всё ещё в backlog без владельца.
+  const card = fileSnapshot(root).get("047");
+  assert.equal(card.status, "backlog");
+  assert.equal(card.owner, "");
+});
+await checkAsync("скрипт вернул 0, карточка в todo без владельца — отказ", async () => {
+  const root = makeBoard("assign-no-owner");
+  const actions = makeActions(root, {
+    runScript: async (options) => {
+      calls.push({ root: options.root, args: [...options.args] });
+      writeCard(options.root, options.args[0], "todo", "");
+      return { ok: true, code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.status, "todo");
+  assert.match(result.message, /без исполнителя/);
+  assert.match(result.message, /bin\/task-assign\.sh/);
+});
 await checkAsync("падение самого канала не роняет ответ", async () => {
   const root = makeBoard("assign-throw");
   const actions = makeActions(root, {
@@ -285,6 +319,40 @@ await checkAsync("возврат из todo снимает владельца и 
   assert.equal(result.status, "backlog");
   assert.deepEqual(calls, [{ root, args: ["047", "--unassign"] }]);
   assert.equal(fileSnapshot(root).get("047").owner, "");
+});
+await checkAsync("возврат: скрипт вернул 0, но карточка осталась в todo — отказ", async () => {
+  const root = makeBoard("unassign-noop", "todo");
+  writeCard(root, "047", "todo", "sess-worker", "worker");
+  const actions = makeActions(root, {
+    runScript: async () => {
+      calls.push({ root, args: ["047", "--unassign"] });
+      return { ok: true, code: 0, stdout: "возврат: #047 → backlog\n", stderr: "" };
+    },
+  });
+  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  assert.equal(result.ok, false, `канал отрапортовал успех без изменений: ${JSON.stringify(result)}`);
+  assert.equal(result.status, "todo");
+  assert.match(result.message, /осталась в todo/);
+  assert.match(result.message, /возврат не подтверждён/);
+  const card = fileSnapshot(root).get("047");
+  assert.equal(card.status, "todo");
+  assert.equal(card.owner, "sess-worker");
+});
+await checkAsync("возврат: карточка в backlog, но владелец/роль не сняты — отказ", async () => {
+  const root = makeBoard("unassign-dirty", "todo");
+  writeCard(root, "047", "todo", "sess-worker", "worker");
+  const actions = makeActions(root, {
+    runScript: async (options) => {
+      calls.push({ root: options.root, args: [...options.args] });
+      writeCard(options.root, options.args[0], "backlog", "sess-worker", "worker");
+      return { ok: true, code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.status, "backlog");
+  assert.match(result.message, /владелец и роль/);
+  assert.match(result.message, /bin\/task-assign\.sh/);
 });
 await checkAsync("из in-progress вернуть нельзя — карточку двигают агенты", async () => {
   const root = makeBoard("unassign-progress", "in-progress");
