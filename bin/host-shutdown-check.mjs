@@ -64,24 +64,82 @@ const READY_TIMEOUT_MS = numberFromEnv("DSH_HARNESS_READY_TIMEOUT_MS", 90_000);
 /** Дополнительное время после бюджета выхода — чтобы увидеть «не вышел». */
 const EXIT_SLACK_MS = 2_000;
 
-const args = new Set(process.argv.slice(2));
-const VERBOSE = args.has("--verbose");
-const KEEP = args.has("--keep");
-const SCENARIO_ONLY = valueOf("--scenario");
-const REPEAT = Number(valueOf("--repeat") ?? 1);
+/** Имена сценариев: по ним же проверяется `--scenario`. */
+const SCENARIO_NAMES = ["control", "board", "roots", "events"];
+
+/**
+ * Разобрать аргументы командной строки.
+ *
+ * Строгий разбор — часть диагностики: опечатка в команде не должна выглядеть
+ * как успешный прогон. Поэтому неизвестный флаг, `--repeat` без числа, ноль или
+ * отрицательное число — код 2 с подсказкой, а не «тихий» дефолт (#052, ревью).
+ *
+ * @param argv - аргументы без `node` и имени файла.
+ * @returns `{ verbose, keep, handles, scenario, repeat, help }`.
+ */
+function parseArgs(argv) {
+  const parsed = { verbose: false, keep: false, handles: false, scenario: undefined, repeat: 1, help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--verbose") parsed.verbose = true;
+    else if (arg === "--keep") parsed.keep = true;
+    else if (arg === "--handles") parsed.handles = true;
+    else if (arg === "-h" || arg === "--help") parsed.help = true;
+    else if (arg === "--scenario") {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        fail(`--scenario: ожидается имя сценария (${SCENARIO_NAMES.join(", ")}), получено ${value === undefined ? "пусто" : `«${value}»`}`);
+      }
+      if (!SCENARIO_NAMES.includes(value)) {
+        fail(`--scenario: неизвестный сценарий «${value}» (есть ${SCENARIO_NAMES.join(", ")})`);
+      }
+      parsed.scenario = value;
+      index += 1;
+    } else if (arg === "--repeat") {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        fail(`--repeat: ожидается целое ≥ 1, получено ${value === undefined ? "пусто" : `«${value}»`}`);
+      }
+      const repeat = Number(value);
+      if (!Number.isInteger(repeat) || repeat < 1) {
+        fail(`--repeat: ожидается целое ≥ 1, получено «${value}»`);
+      }
+      parsed.repeat = repeat;
+      index += 1;
+    } else {
+      fail(`неизвестный аргумент «${arg}» (см. --help)`);
+    }
+  }
+  return parsed;
+}
+
+/** Отказ в аргументах: код 2 и подсказка, без запуска приложения. */
+function fail(message) {
+  console.error(message);
+  console.error("использование: bin/node.sh bin/host-shutdown-check.mjs [--scenario control|board|roots|events] [--repeat N] [--handles] [--verbose] [--keep]");
+  process.exit(2);
+}
+
+const cli = parseArgs(process.argv.slice(2));
+if (cli.help) {
+  console.log("использование: bin/node.sh bin/host-shutdown-check.mjs [--scenario control|board|roots|events] [--repeat N] [--handles] [--verbose] [--keep]");
+  console.log(`  --scenario  сценарий (${SCENARIO_NAMES.join(", ")}), по умолчанию все четыре`);
+  console.log("  --repeat    прогонов на сценарий, целое ≥ 1 (по умолчанию 1)");
+  console.log("  --handles   снять живые handles через inspector (влияет на тайминги)");
+  console.log("  --verbose   печатать IPC-сообщения и stderr хоста");
+  console.log("  --keep      не удалять временный DSH_HOME");
+  process.exit(0);
+}
+const VERBOSE = cli.verbose;
+const KEEP = cli.keep;
+const SCENARIO_ONLY = cli.scenario;
+const REPEAT = cli.repeat;
 /** Снимок handles через inspector — только по флагу: сам inspector влияет на тайминги. */
-const WANT_HANDLES = args.has("--handles");
+const WANT_HANDLES = cli.handles;
 
 function numberFromEnv(name, fallback) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function valueOf(flag) {
-  const index = process.argv.indexOf(flag);
-  if (index < 0) return undefined;
-  const value = process.argv[index + 1];
-  return value && !value.startsWith("-") ? value : undefined;
 }
 
 /** Найти приложение: бинарь Electron, asar и собранный runtime. */
@@ -447,6 +505,11 @@ async function main() {
       }
       rows.push(row);
     }
+  }
+
+  if (rows.length === 0) {
+    console.error("внутренняя ошибка: ни одного прогона — таблица пуста");
+    return 2;
   }
 
   printTable(rows);
