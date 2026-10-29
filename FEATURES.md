@@ -1,0 +1,149 @@
+# dsh-kanban features
+
+[Русская версия](FEATURES.ru.md) · state as of 2026-10-29 (main, DSH 0.2.1-rc.3)
+
+**What it is.** A Kanban board for agent tasks in the DeepSeek Harness right
+sidebar. Task state lives in `.kanban/tasks/*.md` inside the project's git
+repository: the board reads those files and shows them to humans, while the
+plugin's host half watches them and dispatches **work notices** to agent
+sessions. Several roles — dispatcher, executors, reviewer, verifier — work
+against one board without chatting with each other.
+
+## 1. Board in the GUI (client half)
+
+- **"Kanban" tab** in the right sidebar with 8 columns:
+  `backlog → todo → in-progress → in-review → testing → ready → merged`
+  plus `blocked`.
+- **A card** shows its id, title, role and owner (session id), an **"in branch"**
+  badge (the task is not merged yet and the card was read from
+  `worktrees/<id>`), token spend with a per-role breakdown, the note, time and
+  the linked spec. Cards inside a column are sorted by id; a backlog card
+  without an owner is labelled "unassigned".
+- **Details panel** on click: task description, tokens per role, session
+  (role · owner), `spec`, and all role comments in order of appearance.
+- **Human in the loop:** mouse drag **only between `backlog` and `todo`**, plus
+  duplicate buttons "→ To work" / "← To backlog". Forward is assignment: the
+  card gets an owner and the executor is woken by a notice. Back is allowed only
+  from `todo` and clears the owner and role. Other columns are moved by agents
+  only: dropping there answers "this card is moved by agents only".
+- **Move states:** "moving…" while the request is in flight, the board is
+  re-read on success, and a banner shows the host's refusal text ("all
+  executors are busy", "card is in status …") or "channel unavailable" when
+  disconnected.
+- **Refresh:** polling every 3 seconds plus a ⟳ button; light and dark themes;
+  board mockups live in `dsh-kanban/docs/` and are rendered from the real style
+  table.
+
+## 2. Board watcher (host half)
+
+- **Watches boards:** `.kanban/tasks` of the main checkout and of task worktrees
+  (`worktrees/*`, `.worktrees/*`). Copies of one card are merged by `updated`
+  freshness (ties go to the worktree), only the same-named card is taken from a
+  worktree, and a file whose front-matter `id` disagrees with its name is
+  discarded.
+- **Notices delivered into sessions** (through `sessionController.prompt` in
+  queue mode, so a busy session does not lose them):
+  - `in-review`/`testing`/`ready`/`blocked` → `in-progress` returns to the card
+    owner;
+  - a card in `in-review` goes to the reviewer, in `testing` to the verifier, in
+    `ready` to the dispatcher;
+  - **assignment**: a card in `todo` with an owner notifies that executor
+    ("#N has been assigned to you, take it");
+  - **shortfall**: fewer than `minTodo` cards in `todo` notifies the dispatcher
+    ("replenish from backlog").
+- **Delivery reliability:** deduplication by card version
+  (`id:status:updated`) plus a state file; undelivered notices are remembered in
+  `.watcher-pending.json` and retried on profile start; the startup pass
+  announces whatever is already waiting for a role or an assignment.
+- **Roles are discovered automatically** from the `agent-preset/selected`
+  event and stored per board in `.kanban/.watcher-roles.json` (survives
+  restarts); `roles` in the plugin row is a manual override. A role does not
+  leak between boards: both capture and delivery check the session's working
+  directory.
+- **`boards` and `roots`:** explicit project roots or automatic tree discovery —
+  every folder with `.kanban/tasks` gets its own watcher, role map and notices.
+- **Client → host command channel** `kanbanCardActions` (a plugin-owned Typert
+  remote): GUI `assign`/`unassign`, runs `bin/task-assign.sh` without a shell,
+  validates requests, serializes assignments, verifies that the card actually
+  changed, and cancels work when the plugin is unloaded.
+- **Channel self-check** after startup: "sees the endpoint" / "not verified —
+  gateway not ready yet" / "not announced", with distinct log levels.
+- **Graceful shutdown:** disposal via `ctx.effect` closes watchers and timers,
+  aborts in-flight notices and child `task-assign.sh` processes, is idempotent
+  and fits the DSH budget (5 s) — verified against a real Host process.
+
+## 3. Team workflow (protocol)
+
+- **Roles:** `dispatcher`, `worker`, `reviewer`, `verifier` — agent presets
+  installed into the profile; permissions and transitions are described in
+  `AGENTS.md`.
+- **The card is the single source of status** (front matter: `status`, `owner`,
+  `role`, `spec`, `since`, `tokens`, `tokens_<role>`, `note`, `branch`,
+  `worktree`). Transitions go through `bin/task-move.sh` only; merging goes
+  through `bin/task-commit.sh` only.
+- **Per-task isolation:** `task-new.sh` creates `worktrees/<id>`, branch
+  `task/<id>` and the card inside that branch. Merging is `--no-ff` with a
+  `[<ID>] …` message, after which the worktree is removed. `git push` is a human
+  action only.
+- **Queue and backlog:** specs in `.kanban/specs/<NNN>.md` and the `spec` field;
+  tasks are sliced into `backlog` without an owner; `minTodo` lives in
+  `.kanban/board.json`; the executor pool is `.kanban/.workers.json`; issuing is
+  done by `backlog-fill.sh` in FIFO order over the merged board snapshot
+  (including cards that exist only in a branch); manual assignment is
+  `task-assign.sh`.
+- **Protocol limits:** one `in-progress` per agent, at most three tasks in
+  flight, only the dispatcher issues tasks, and review/testing return the card
+  to the same executor.
+
+## 4. Tools (`bin/`, 19 scripts)
+
+| Group | Scripts |
+|---|---|
+| Tasks | `task-new` (worktree + branch + card, `--backlog`, `--spec`), `task-move` (validated transitions), `task-commit` (merge and `--no-merge`), `task-assign` (assign/unassign), `backlog-fill`, `spec-new`, `task-usage` (tokens from the DSH projection cache) |
+| Board | `board-status` (dump, `--json`), `board-sync` (manifest for worktrees outside the project) |
+| Installation | `install-kanban` (web/desktop profiles, guards against double mounting), `install-presets`, `gen-role-presets` (presets generated from the built-in `standard` preset) |
+| Quality | `test.sh` (whole suite), `test-scripts.sh` (scripts, locales, exit codes), `host-shutdown-check.mjs` (real Host: control/board/roots/events), `render-mockup.sh`, `sync-from-awg.sh`, `node.sh` |
+
+## 5. Compatibility and reliability
+
+- Verified on DSH **0.2.1-rc.3** (and 0.1.7 earlier) with macOS bash 3.2:
+  presets are regenerated from the DSH template; scripts do not break under
+  `LANG=C.UTF-8`; exit codes are not masked; `task-assign` and `backlog-fill`
+  honestly return 1/2/3/4.
+- DSH updates install cleanly (graceful shutdown); upgrades preserve the
+  profile bundles, the plugin symlink, the role map and `.workers.json`.
+- Deduplication and retries for undelivered notices; assignment results are
+  verified on the channel side; child processes are cancelled on unload.
+
+## 6. Tests, mockups, documentation
+
+- **10 test files** plus `bin/test-scripts.sh`: **365 checks** in `bin/test.sh` —
+  browserless rendering, card parser, worktree copy merging, notices, worktree
+  observation, the command channel, dispose/shutdown, scripts, locales. There is
+  also a separate slow harness for a real Host process (not part of the suite).
+- Mockups in `docs/` are rendered from the real `client.js` style table; checks
+  keep the file table in `KANBAN.md` truthful and complete.
+- Documentation: `KANBAN.md` (overview, installation, scenarios, limits,
+  troubleshooting), `AGENTS.md` (agent protocol), `.kanban/tasks/README.md`
+  (card format), specs `001`–`003` (backlog and issuance; human in the loop;
+  graceful shutdown), and the `kanban` and `commit` skills.
+
+## 7. Boundaries: what is not here
+
+- The board does **not** write state into DSH storage: files are the source of
+  truth, so updates are polled (every 3 s) rather than streamed.
+- Humans move cards only between `backlog` and `todo`; drag between other
+  columns, priorities, deadlines and mobile DnD are not supported.
+- Pushing to a remote is not an agent operation; the only known red check in the
+  suite is the mirror comparison against `~/projects/awg`.
+
+## Numbers
+
+44 tasks merged, ~3,200 lines of plugin code, ~4,100 lines of tests, 19 scripts,
+365 checks in the suite.
+
+## Roadmap ideas (v2)
+
+- state in DSH storage (`storageDomain`) and a Typert stream for live updates;
+- a `kanban_move` tool for agents instead of file operations;
+- a full-width board panel (the `main` slot) instead of a sidebar tab.

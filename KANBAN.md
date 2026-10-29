@@ -34,6 +34,8 @@
 | `bin/test.sh` | Прогнать все проверки набора |
 | `.kanban/tasks/` | Карточки задач: один `<id>.md` на задачу |
 | `AGENTS.md` | Протокол работы агентов (читается каждым агентом автоматически) |
+| `FEATURES.ru.md` | Фичалист плагина на русском: доска, сторож, протокол, инструменты, границы |
+| `FEATURES.md` | То же на английском (English feature list) |
 | `.agents/skills/kanban/SKILL.md` | Скил: как взять задачу и сдать её на код-ревью |
 | `.agents/skills/commit/SKILL.md` | Скил: правило сообщения коммита `[{SHORT_BRANCH_NAME}] Message` |
 | `agent-presets/{dispatcher,worker,reviewer,verifier}/` | Заготовки пресетов агентов |
