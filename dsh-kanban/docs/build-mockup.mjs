@@ -231,7 +231,7 @@ const frame = view === "panel"
       <div class="brand">DeepSeek Harness</div>
       <div class="ws">Проекты</div>
       <div class="row active"><span class="dot" style="background:#22c55e"></span>awg<span class="meta">2</span></div>
-      <div class="row"><span class="dot" style="background:#3b82f6"></span>awg-t002<span class="meta">1</span></div>
+      <div class="row"><span class="dot" style="background:#3b82f6"></span>demo-t002<span class="meta">1</span></div>
       <div class="row"><span class="dot" style="background:#3b82f6"></span>awg-t003<span class="meta">1</span></div>
       <div class="ws">Сессии · awg</div>
       <div class="row active"><span class="dot" style="background:#f59e0b"></span>Диспетчер<span class="meta">сейчас</span></div>
@@ -248,7 +248,7 @@ const frame = view === "panel"
         <div class="msg user">Разбей работу по доске на задачи и раздай воркерам: плагин, пресеты, тесты.</div>
         <div class="msg bot">Завёл карточки 002–005 и три worktree. Воркеры уже в работе; четвертая задача ждёт верификатора.</div>
         <div class="tool">$ bin/task-new.sh "Колонки, карточки и опрос .kanban/tasks"</div>
-        <div class="tool">задача 002: .kanban/tasks/002.md · worktree: ~/projects/awg-t002 (ветка task/002)</div>
+        <div class="tool">задача 002: .kanban/tasks/002.md · worktree: ~/projects/demo-t002 (ветка task/002)</div>
         <div class="msg bot">Слежу за доской: как только карточка уйдёт в review — проверю и слью ветку.</div>
       </div>
       <div class="composer">Написать сообщение…</div>

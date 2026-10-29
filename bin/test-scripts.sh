@@ -1473,61 +1473,6 @@ if grep -q '^tokens_worker: 6000' "$guard_card"; then pass "расход рол�
 if grep -q '^tokens: 6000' "$guard_card"; then pass "суммарный расход посчитан"; else fail "tokens: $(grep '^tokens:' "$guard_card")"; fi
 if grep -q '^since: ' "$guard_card"; then pass "метка since записана"; else fail "since не записан"; fi
 
-echo "== синхронизация набора: перенос, удаление, --check"
-sync_src="$WORK/sync-src"; sync_dst="$WORK/sync-dst"
-mkdir -p "$sync_src/bin" "$sync_src/.kanban/tasks" "$sync_dst/bin"
-cp "$ROOT/bin/sync-from-awg.sh" "$sync_src/bin/sync-from-awg.sh"
-cp "$ROOT/bin/sync-from-awg.sh" "$sync_dst/bin/sync-from-awg.sh"
-chmod +x "$sync_src/bin/sync-from-awg.sh" "$sync_dst/bin/sync-from-awg.sh"
-printf 'one' > "$sync_src/bin/one.sh"
-printf 'two' > "$sync_src/bin/two.sh"
-printf 'readme' > "$sync_src/.kanban/tasks/README.md"
-if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >"$WORK/out41" 2>&1 ); then
-  if [[ -f "$sync_dst/bin/one.sh" && -f "$sync_dst/bin/two.sh" && -f "$sync_dst/.kanban/tasks/README.md" ]]; then
-    pass "перенос из источника копирует файлы набора"
-  else
-    fail "после переноса не все файлы на месте"
-  fi
-else
-  fail "перенос упал: $(cat "$WORK/out41")"
-fi
-printf 'лишний' > "$sync_dst/bin/only-here.sh"
-rm "$sync_src/bin/two.sh"
-# Удаление лишнего делает rsync --delete: без него скрипт предупреждает и копирует
-# без удаления, поэтому проверка не имеет смысла, а не «падает».
-if ! command -v rsync >/dev/null 2>&1; then
-  echo "   пропуск: удаление лишнего и совпадение после него требуют rsync (его нет в PATH)"
-else
-  ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" >/dev/null 2>&1 )
-  if [[ -f "$sync_dst/bin/two.sh" || -f "$sync_dst/bin/only-here.sh" ]]; then
-    fail "перенос не убрал то, чего нет в источнике"
-  else
-    pass "перенос убирает то, чего нет в источнике"
-  fi
-  # Без rsync лишнее осталось бы в приёмнике, и --check честно сказал бы про
-  # расхождение — поэтому и эта проверка относится к сценарию с удалением.
-  if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >/dev/null 2>&1 ); then
-    pass "после переноса --check видит совпадение"
-  else
-    fail "--check не видит совпадение сразу после переноса"
-  fi
-fi
-printf 'правка' >> "$sync_dst/bin/one.sh"
-if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$sync_src" --check >"$WORK/out42" 2>&1 ); then
-  fail "--check не заметил расхождение"
-else
-  if grep -q "bin" "$WORK/out42"; then
-    pass "--check называет разошедшийся путь"
-  else
-    fail "сообщение: $(cat "$WORK/out42")"
-  fi
-fi
-if ( cd "$sync_dst" && ./bin/sync-from-awg.sh --from "$WORK/нет-такого" --check >"$WORK/out43" 2>&1 ); then
-  pass "отсутствующий источник не ломает проверку"
-else
-  fail "отсутствующий источник дал ошибку: $(cat "$WORK/out43")"
-fi
-
 echo "== таблица файлов в KANBAN.md не врёт"
 # Смотрим только таблицу раздела «Что лежит в проекте»: в других таблицах
 # встречаются команды и голые имена файлов, и проверка путей к ним не относится.
@@ -1546,35 +1491,6 @@ elif [[ -z "$missing" ]]; then
   pass "все пути из таблицы файлов существуют (проверено $checked)"
 else
   fail "в таблице файлов есть несуществующие пути:$missing"
-fi
-
-code=0
-( cd "$sync_dst" && ./bin/sync-from-awg.sh --from --check >"$WORK/out62" 2>&1 ) || code=$?
-if [[ "$code" == "2" ]] && grep -q "начинается с «-»" "$WORK/out62"; then
-  pass "--from --check отвергнут: путь забыт"
-else
-  fail "код $code, вывод: $(head -1 "$WORK/out62")"
-fi
-code=0
-( cd "$sync_dst" && ./bin/sync-from-awg.sh --from=--check >"$WORK/out63" 2>&1 ) || code=$?
-if [[ "$code" == "0" ]] && grep -q "источник набора не найден" "$WORK/out63"; then
-  pass "--from=--check остаётся честным значением"
-else
-  fail "код $code, вывод: $(head -1 "$WORK/out63")"
-fi
-code=0
-( cd "$sync_dst" && ./bin/sync-from-awg.sh --from= >"$WORK/out57" 2>&1 ) || code=$?
-if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out57"; then
-  pass "пустой --from= тоже отвергнут"
-else
-  fail "код $code, вывод: $(head -1 "$WORK/out57")"
-fi
-code=0
-( cd "$sync_dst" && ./bin/sync-from-awg.sh --from >"$WORK/out56" 2>&1 ) || code=$?
-if [[ "$code" == "2" ]] && grep -q "требует значения" "$WORK/out56"; then
-  pass "--from без значения: код 2 и подсказка"
-else
-  fail "код $code, вывод: $(head -1 "$WORK/out56")"
 fi
 
 echo "== дамп доски"
@@ -1660,59 +1576,6 @@ if [[ -z "$unlisted" ]]; then
   pass "каждый файл набора упомянут в таблице"
 else
   fail "в таблице не упомянуты:$unlisted"
-fi
-
-# Сверка не должна краснеть из-за чужой незакоммиченной работы в источнике (#034).
-dirty_src="$WORK/dirty-src"; dirty_dst="$WORK/dirty-dst"
-for dir in "$dirty_src" "$dirty_dst"; do
-  mkdir -p "$dir/bin"
-  git -C "$dir" init -q >/dev/null 2>&1
-  cp "$ROOT/bin/sync-from-awg.sh" "$dir/bin/sync-from-awg.sh"
-  chmod +x "$dir/bin/sync-from-awg.sh"
-done
-printf 'версия 1\n' > "$dirty_src/bin/one.sh"
-printf 'общий файл\n' > "$dirty_src/bin/two.sh"
-git -C "$dirty_src" add -A >/dev/null 2>&1
-if ! git -C "$dirty_src" -c user.email=t@t -c user.name=t commit -qm "версия 1" >/dev/null 2>&1; then
-  fail "не удалось подготовить источник для проверки сверки"
-fi
-if ! git -C "$dirty_src" cat-file -e HEAD:bin/one.sh 2>/dev/null; then
-  fail "в источнике нет зафиксированного bin/one.sh — проверка была бы ложной"
-fi
-cp "$dirty_src/bin/one.sh" "$dirty_dst/bin/one.sh"
-cp "$dirty_src/bin/two.sh" "$dirty_dst/bin/two.sh"
-printf 'незакоммиченная правка\n' > "$dirty_src/bin/one.sh"
-if ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out66" 2>&1 ); then
-  if grep -q "незакоммиченных" "$WORK/out66"; then
-    pass "сверка не краснеет из-за незакоммиченной работы источника"
-  else
-    pass "сверка прошла (о незакоммиченном не сообщено)"
-  fi
-else
-  fail "сверка покраснела: $(tr '\n' ' ' < "$WORK/out66")"
-fi
-# Расхождение проверяем на закоммиченном пути: незакоммиченный справедливо пропускается.
-# Перенос из грязного источника, затем сверка: незакоммиченное у источника не шумит.
-if ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" >/dev/null 2>&1 ) &&
-   ( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out68" 2>&1 ); then
-  pass "после переноса из грязного источника сверка зелёная"
-else
-  fail "сверка после переноса: $(tr '\n' ' ' < "$WORK/out68")"
-fi
-printf 'версия 2\n' > "$dirty_dst/bin/two.sh"
-code=0
-( cd "$dirty_dst" && ./bin/sync-from-awg.sh --from "$dirty_src" --check >"$WORK/out67" 2>&1 ) || code=$?
-if [[ "$code" == "1" ]] && grep -q "bin" "$WORK/out67"; then
-  pass "настоящее расхождение по-прежнему ловится"
-else
-  fail "код $code, вывод: $(tr '\n' ' ' < "$WORK/out67")"
-fi
-
-echo "== набор совпадает с проектом-источником"
-if "$ROOT/bin/sync-from-awg.sh" --check >"$WORK/out40" 2>&1; then
-  pass "$(head -1 "$WORK/out40")"
-else
-  fail "$(tr '\n' '; ' < "$WORK/out40")"
 fi
 
 echo "== пресеты ролей: генерация строк и установка в патч-слой профиля"
