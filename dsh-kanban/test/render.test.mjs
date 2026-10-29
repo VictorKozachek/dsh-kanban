@@ -281,7 +281,7 @@ async function renderBoard(remote) {
   const props = {
     sessionId: "session-1",
     t: ctx.locale.bind("kanban"),
-    useSessions: (selector) => selector({ byId: { "session-1": { cwd: "/Users/victor/projects/awg" } } }),
+    useSessions: (selector) => selector({ byId: { "session-1": { cwd: "/Users/victor/projects/demo-workspace" } } }),
     loadBoard: (signal) => plugin.__internals.createLoader(remote)("session-1", signal)
   };
   const tree = await render(body, props);
@@ -444,7 +444,7 @@ assert.equal(captured.titles[0].key, "dsh-kanban");
 
 // Отрисовка
 assert.match(text, /Канбан/, "в дереве есть заголовок доски");
-assert.match(text, /awg · 5 карточек/, "в подписи — имя рабочей директории и число карточек");
+assert.match(text, /demo-workspace · 5 карточек/, "в подписи — имя рабочей директории и число карточек");
 for (const label of ["Бэклог", "Нужно сделать", "В работе", "Тестирование", "Готово к слиянию", "Влито", "Заблокировано"]) {
   assert.ok(text.includes(label), `нет колонки «${label}»`);
 }
