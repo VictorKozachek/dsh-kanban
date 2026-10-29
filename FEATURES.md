@@ -102,7 +102,7 @@ against one board without chatting with each other.
 | Tasks | `task-new` (worktree + branch + card, `--backlog`, `--spec`), `task-move` (validated transitions), `task-commit` (merge and `--no-merge`), `task-assign` (assign/unassign), `backlog-fill`, `spec-new`, `task-usage` (tokens from the DSH projection cache) |
 | Board | `board-status` (dump, `--json`), `board-sync` (manifest for worktrees outside the project) |
 | Installation | `install-kanban` (web/desktop profiles, guards against double mounting), `install-presets`, `gen-role-presets` (presets generated from the built-in `standard` preset) |
-| Quality | `test.sh` (whole suite), `test-scripts.sh` (scripts, locales, exit codes), `host-shutdown-check.mjs` (real Host: control/board/roots/events), `render-mockup.sh`, `sync-from-awg.sh`, `node.sh` |
+| Quality | `test.sh` (whole suite), `test-scripts.sh` (scripts, locales, exit codes), `host-shutdown-check.mjs` (real Host: control/board/roots/events), `render-mockup.sh`, `node.sh` |
 
 ## 5. Compatibility and reliability
 
@@ -117,7 +117,7 @@ against one board without chatting with each other.
 
 ## 6. Tests, mockups, documentation
 
-- **10 test files** plus `bin/test-scripts.sh`: **365 checks** in `bin/test.sh` —
+- **10 test files** plus `bin/test-scripts.sh`: **352 checks** in `bin/test.sh` —
   browserless rendering, card parser, worktree copy merging, notices, worktree
   observation, the command channel, dispose/shutdown, scripts, locales. There is
   also a separate slow harness for a real Host process (not part of the suite).
@@ -134,13 +134,15 @@ against one board without chatting with each other.
   truth, so updates are polled (every 3 s) rather than streamed.
 - Humans move cards only between `backlog` and `todo`; drag between other
   columns, priorities, deadlines and mobile DnD are not supported.
-- Pushing to a remote is not an agent operation; the only known red check in the
-  suite is the mirror comparison against `~/projects/awg`.
+- The set is self-contained: there are no external copies, mirrors or
+  synchronisation with other projects — this repository is the only source, and
+  `bin/test.sh` is fully green.
+- Pushing to a remote is not an agent operation.
 
 ## Numbers
 
-44 tasks merged, ~3,200 lines of plugin code, ~4,100 lines of tests, 19 scripts,
-365 checks in the suite.
+45 tasks merged, ~3,200 lines of plugin code, ~4,100 lines of tests,
+18 scripts, 352 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
 
