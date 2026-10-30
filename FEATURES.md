@@ -141,8 +141,9 @@ against one board without chatting with each other.
   keep the file table in `KANBAN.md` truthful and complete.
 - Documentation: `KANBAN.md` (overview, installation, scenarios, limits,
   troubleshooting), `AGENTS.md` (agent protocol), `.kanban/tasks/README.md`
-  (card format), specs `001`–`004` (backlog and issuance; human in the loop;
-  graceful shutdown; child boards), and the `kanban` and `commit` skills.
+  (card format); task specs are created with `bin/spec-new.sh` and, like
+  task cards, are not part of this public snapshot — they stay as local
+  working history. Skills: `kanban` and `commit`.
 
 ## 7. Boundaries: what is not here
 
@@ -163,7 +164,8 @@ against one board without chatting with each other.
 
 ## Numbers
 
-48 tasks merged, ~4,300 lines of plugin code, ~5,100 lines of tests,
+48 tasks driven through the board during development, ~4,300 lines of
+plugin code, ~5,100 lines of tests,
 19 scripts, 408 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
