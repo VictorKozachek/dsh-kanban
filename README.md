@@ -89,13 +89,13 @@ bin/task-move.sh 007 todo --owner "<session-id>"
 | `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (формат карточки); карточки и спеки в публичный снапшот не входят |
 | `agent-presets/`, `presets/` | заготовки пресетов ролей и сгенерированные строки для профиля |
 | `.agents/skills/` | скилы DSH `kanban` и `commit` |
-| `test/`, `dsh-kanban/test/` | регрессии: 12 файлов, 408 проверок |
+| `test/`, `dsh-kanban/test/` | регрессии: 12 файлов, 410 проверок |
 | `KANBAN.md`, `FEATURES*.md`, `AGENTS.md` | руководство, фичалист (ru/en), протокол агентов |
 
 ## Проверки · Tests
 
 ```bash
-bin/test.sh                                   # весь набор: 408 проверок, должен быть зелёным
+bin/test.sh                                   # весь набор: 410 проверок, должен быть зелёным
 bin/node.sh bin/host-shutdown-check.mjs       # реальный graceful shutdown Host'а (4 сценария)
 ```
 
