@@ -44,7 +44,7 @@ sessions, so several roles can work against one board.
 ## Установка · Install
 
 ```bash
-git clone https://github.com/<your-account>/dsh-kanban.git
+git clone https://github.com/VictorKozachek/dsh-kanban.git
 cd dsh-kanban
 
 # 1. плагин в профиль: web — штатно, desktop — тем же скриптом вручную
