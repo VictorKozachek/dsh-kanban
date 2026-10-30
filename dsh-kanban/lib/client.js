@@ -1355,7 +1355,7 @@ window.__ModuleLoader__.load({
         let stopped = false;
         let timer = 0;
         const controller = new AbortController();
-        const tick = async () => {
+        const tick = async (force) => {
           if (typeof readRef.current !== "function") return;
           let result;
           try {
@@ -1374,13 +1374,26 @@ window.__ModuleLoader__.load({
             error: ok ? "" : describeError(result ? result.error : null),
             offline: Boolean(result && result.offline)
           };
+          // Подпись — то, что вкладка рисует: название/наличие доски, её счётчики,
+          // карточки «в работе» (сводка) и полные карточки (drill-down и панель
+          // деталей). Прежняя подпись считала только число карточек в работе,
+          // поэтому смена владельца, названия или updated не доходила до экрана.
           const fingerprint = JSON.stringify([
             next.error,
             next.manifest,
             next.problems,
-            next.boards.map((board) => [board.path, board.problems, childrenCounts(board), childrenInProgress(board).length])
+            next.boards.map((board) => [
+              board.path,
+              board.title,
+              board.missing,
+              board.problems,
+              childrenCounts(board),
+              childrenInProgress(board),
+              board.cards || []
+            ])
           ]);
-          if (fingerprint === signature.current) return;
+          // force — кнопка ⟳: оператор просит перерисовать даже при той же подписи.
+          if (!force && fingerprint === signature.current) return;
           signature.current = fingerprint;
           setState((previous) =>
             ok
@@ -1423,7 +1436,8 @@ window.__ModuleLoader__.load({
               title: t("refresh"),
               "data-kanban-children-refresh": "1",
               onClick: () => {
-                if (typeof tickRef.current === "function") tickRef.current();
+                // ⟳ — обновить сейчас: forced-тик не глохнет на совпавшей подписи.
+                if (typeof tickRef.current === "function") tickRef.current(true);
               }
             },
             "⟳"

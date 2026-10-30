@@ -447,6 +447,72 @@ await checkAsync("кнопка «к списку досок» возвращае
 
 view.cleanup();
 
+console.log("== ⟳ обновляет то, что нарисовано, а не только счётчики");
+
+/**
+ * Канал, который отдаёт сначала OVERVIEW, а потом — ту же сводку с изменёнными
+ * полями карточек: владелец и название меняются, а счётчики по статусам и число
+ * карточек «в работе» остаются прежними. Ровно этот случай ревью и поймало.
+ */
+function changedOverview() {
+  const next = JSON.parse(JSON.stringify(OVERVIEW));
+  const card = next.boards[0].cards.find((item) => item.id === "003");
+  card.owner = "sess-NEW-OWNER";
+  card.title = "Колонки (переименовано)";
+  card.updated = "2026-10-30T18:00:00Z";
+  next.boards[0].inProgress[0] = {
+    id: "003",
+    title: "Колонки (переименовано)",
+    owner: "sess-NEW-OWNER",
+    role: "worker",
+    updated: "2026-10-30T18:00:00Z"
+  };
+  return next;
+}
+
+await checkAsync("смена владельца/названия без смены счётчиков доезжает по ⟳", async () => {
+  const calls = [];
+  const connection = makeConnection((namespace, method) => {
+    calls.push(method);
+    const payload = calls.length === 1 ? OVERVIEW : changedOverview();
+    return { ok: true, value: { ok: true, value: payload } };
+  });
+  const fresh = await renderChildren(connection);
+  assert.equal(calls.length, 1, "первый тик не спросил обзор");
+  assert.equal(fresh.view.text().includes("sess-NEW-OWNER"), false, "новые данные появились до ⟳");
+  // Счётчики и число карточек в работе не меняются — подпись старой проверки была бы той же.
+  assert.deepEqual(
+    fresh.view.attrs("data-kanban-children-count").sort(),
+    ["backlog", "in-progress", "ready", "todo"],
+    "в фикстуре изменились счётчики — сценарий не проверяет подпись"
+  );
+  await fresh.view.click("data-kanban-children-refresh");
+  assert.ok(calls.length >= 2, "⟳ не перезапросил обзор");
+  const text = fresh.view.text();
+  assert.ok(text.includes("sess-NEW-OWNER"), `после ⟳ нет нового владельца: ${text.slice(0, 300)}`);
+  assert.ok(text.includes("Колонки (переименовано)"), "после ⟳ нет нового названия");
+  assert.ok(text.includes("2026-10-30T18:00:00Z"), "после ⟳ нет нового updated");
+  fresh.view.cleanup();
+});
+
+await checkAsync("⟳ обновляет и drill-down с панелью деталей", async () => {
+  const calls = [];
+  const connection = makeConnection((namespace, method) => {
+    calls.push(method);
+    const payload = calls.length === 1 ? OVERVIEW : changedOverview();
+    return { ok: true, value: { ok: true, value: payload } };
+  });
+  const fresh = await renderChildren(connection);
+  await fresh.view.click("data-kanban-children-board");
+  await fresh.view.clickValue("data-kanban-children-card-id", "003");
+  const before = collectText(nodesWith(fresh.view.tree, "data-kanban-children-details")[0]).join(" | ");
+  assert.equal(before.includes("sess-NEW-OWNER"), false, "новые данные появились до ⟳");
+  await fresh.view.click("data-kanban-children-refresh");
+  const after = collectText(nodesWith(fresh.view.tree, "data-kanban-children-details")[0]).join(" | ");
+  assert.ok(after.includes("sess-NEW-OWNER"), `в панели деталей нет нового владельца: ${after.slice(0, 300)}`);
+  fresh.view.cleanup();
+});
+
 console.log("== пустые состояния и ошибки канала");
 
 await checkAsync("нет манифеста — подсказка с командой bin/board-children.sh", async () => {
