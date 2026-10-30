@@ -54,6 +54,7 @@
 | `dsh-kanban/docs/check-mockup.py` | Поведенческие проверки painter'а (высота карточки, предел чипа) |
 | `bin/task-usage.sh` | Расход токенов сессии из кэша проекций DSH (для поля `tokens_<роль>`) |
 | `bin/board-sync.sh` | Манифест открытых карточек — нужен только для worktree **вне** проекта (`--print` — показать) |
+| `bin/board-children.sh` | Манифест дочерних досок дерева проектов (`.kanban/children.json`): обход `--root` на глубину `--depth`, относительные пути от `--base`, внешние доски `--board`, `--print` |
 | `bin/install-kanban.sh` | Поставить плагин в профиль DSH: `web` — штатно, `desktop` — вручную скриптом; `--takeover` убирает ручной ряд |
 | `bin/node.sh` | Найти Node для тестов и макетов: PATH сессии урезан, Homebrew-ноды в нём нет |
 | `bin/gen-role-presets.sh` | Собрать строки пресетов ролей из встроенного `standard` → `presets/role-presets.patch.yml` |
