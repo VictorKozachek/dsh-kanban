@@ -11,3 +11,8 @@ worktrees/
 
 # Python-кэш (создают painter/mockup-проверки)
 __pycache__/
+
+# macOS / IDE
+.DS_Store
+.idea/
+*.log
