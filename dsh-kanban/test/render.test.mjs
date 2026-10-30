@@ -181,7 +181,7 @@ const plugin = entry.factory((name) => {
 // ── поддельный cordis-контекст ───────────────────────────────────────────────
 
 const TASKS = {
-  ".kanban/worktrees.json": JSON.stringify({ version: 1, cards: ["/tmp/awg-t002/.kanban/tasks/002.md"] }),
+  ".kanban/worktrees.json": JSON.stringify({ version: 1, cards: ["/tmp/demo-t002/.kanban/tasks/002.md"] }),
   ".kanban/tasks/001.md": "---\nid: 001\ntitle: Скелет плагина\nstatus: merged\nupdated: 2026-09-23T14:00:00Z\n---\n",
   ".kanban/tasks/003.md": "---\nid: 003\ntitle: Пресеты агентов\nstatus: in-progress\ntokens: \"0\"\nupdated: 2026-09-23T15:12:00Z\n---\n",
   ".kanban/tasks/005.md":
@@ -190,7 +190,7 @@ const TASKS = {
   // Карточка из бэклога: статус свой, владельца нет — подпись «не назначено».
   ".kanban/tasks/007.md":
     "---\nid: 007\ntitle: Спека бэклога\nstatus: backlog\nowner: \"\"\nupdated: 2026-09-23T15:45:00Z\n---\n",
-  "/tmp/awg-t002/.kanban/tasks/002.md":
+  "/tmp/demo-t002/.kanban/tasks/002.md":
     "---\nid: 002\ntitle: Колонки и карточки\nstatus: in-progress\nowner: session-71bd0c3e-4a92\nbranch: task/002\nupdated: 2026-09-23T15:40:00Z\n---\n"
 };
 
@@ -281,7 +281,7 @@ async function renderBoard(remote) {
   const props = {
     sessionId: "session-1",
     t: ctx.locale.bind("kanban"),
-    useSessions: (selector) => selector({ byId: { "session-1": { cwd: "/Users/victor/projects/demo-workspace" } } }),
+    useSessions: (selector) => selector({ byId: { "session-1": { cwd: "/home/user/projects/demo-workspace" } } }),
     loadBoard: (signal) => plugin.__internals.createLoader(remote)("session-1", signal)
   };
   const tree = await render(body, props);

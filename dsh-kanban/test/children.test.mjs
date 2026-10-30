@@ -100,14 +100,14 @@ console.log("== манифест: относительные и абсолютн
 
 check("относительный путь резолвится от cwd, абсолютный остаётся как есть", () => {
   assert.equal(resolveBoardPath("/ws", "aif-project/infra"), "/ws/aif-project/infra");
-  assert.equal(resolveBoardPath("/ws", "/Users/victor/projects/other"), "/Users/victor/projects/other");
+  assert.equal(resolveBoardPath("/ws", "/home/user/projects/other"), "/home/user/projects/other");
   assert.equal(resolveBoardPath("/ws", ""), "");
 });
 
 check("заголовок: title из манифеста, иначе последний сегмент, хвостовой слэш не мешает", () => {
   assert.equal(boardTitle("aif-project/infra", ""), "infra");
   assert.equal(boardTitle("aif-project/infra/", undefined), "infra");
-  assert.equal(boardTitle("/Users/victor/projects/other-project", "Другой проект"), "Другой проект");
+  assert.equal(boardTitle("/home/user/projects/other-project", "Другой проект"), "Другой проект");
   assert.equal(boardTitle("/", ""), ".");
 });
 

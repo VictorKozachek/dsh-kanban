@@ -1494,14 +1494,13 @@ else
 fi
 
 echo "== дамп доски"
-if "$ROOT/bin/board-status.sh" >"$WORK/out58" 2>&1; then
-  if grep -q "^доска:" "$WORK/out58" && grep -q "in-review" "$WORK/out58" && grep -q "^  #[0-9]" "$WORK/out58"; then
-    pass "дамп доски печатает колонки и карточки"
-  else
-    fail "неожиданный вывод: $(head -3 "$WORK/out58")"
-  fi
+# В публичном снапшоте у репозитория может не быть карточек (локальная история
+# работы не публикуется), поэтому здесь проверяем только шапку дампа, а колонки
+# и карточки — на самодостаточной фикстуре ниже.
+if "$ROOT/bin/board-status.sh" >"$WORK/out58" 2>&1 && grep -q "^доска:" "$WORK/out58"; then
+  pass "дамп доски печатает шапку"
 else
-  fail "дамп доски упал: $(cat "$WORK/out58")"
+  fail "дамп доски упал: $(head -3 "$WORK/out58" 2>/dev/null)"
 fi
 # Фикстура самодостаточна: карточка в main и одноимённая в работе — как в проекте.
 dump_repo="$WORK/dumprepo"
@@ -1512,6 +1511,11 @@ if "$ROOT/bin/board-status.sh" --root "$dump_repo" >"$WORK/out59" 2>&1 && grep -
   pass "карточка из worktree помечена «в ветке» и берётся её статус"
 else
   fail "нет отметки ветки: $(head -3 "$WORK/out59")"
+fi
+if "$ROOT/bin/board-status.sh" --root "$dump_repo" >"$WORK/out59b" 2>&1 && grep -q "^  #001" "$WORK/out59b" && grep -q "in-progress" "$WORK/out59b"; then
+  pass "дамп доски печатает колонки и карточки"
+else
+  fail "дамп фикстуры: $(head -3 "$WORK/out59b")"
 fi
 # Работа уже в main, а worktree забыли убрать: свежая запись побеждает, как на доске.
 printf -- "---\nid: \"001\"\nstatus: merged\ntitle: Карточка в ветке\nupdated: 2026-10-15T10:00:00Z\n---\n" > "$dump_repo/.kanban/tasks/001.md"
@@ -1546,11 +1550,17 @@ if [[ "$code" == "2" ]] && grep -q "начинается с «-»" "$WORK/out65"
 else
   fail "код $code, вывод: $(head -1 "$WORK/out65")"
 fi
-if "$ROOT/bin/board-status.sh" --json >"$WORK/out60" 2>&1 &&
+if "$ROOT/bin/board-status.sh" --root "$dump_repo" --json >"$WORK/out60" 2>&1 &&
   "$ROOT/bin/node.sh" -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!Array.isArray(d.cards)||!d.cards.length) process.exit(1)" "$WORK/out60"; then
   pass "--json отдаёт карточки машинно"
 else
-  fail "json: $(head -2 "$WORK/out60")"
+  fail "json фикстуры: $(head -2 "$WORK/out60")"
+fi
+if "$ROOT/bin/board-status.sh" --json >"$WORK/out60b" 2>&1 &&
+  "$ROOT/bin/node.sh" -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!Array.isArray(d.cards)||typeof d.root!=='string') process.exit(1)" "$WORK/out60b"; then
+  pass "--json на репозитории даёт валидную структуру"
+else
+  fail "json репозитория: $(head -2 "$WORK/out60b")"
 fi
 code=0
 "$ROOT/bin/board-status.sh" --root >"$WORK/out61" 2>&1 || code=$?

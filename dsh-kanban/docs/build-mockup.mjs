@@ -66,6 +66,8 @@ const escapeHtml = (text) =>
 
 /** Демонстрационные карточки: правдоподобная работа по этому же проекту. */
 // Общий список демонстрационных карточек: тот же файл читает painter.
+const PROJECT_NAME = "demo-project";
+
 const CARDS = JSON.parse(fs.readFileSync(path.join(here, "demo-cards.json"), "utf8"));
 
 const normalizeStatus = plugin.__internals.normalizeStatus;
@@ -142,7 +144,7 @@ function boardHtml() {
   const header = [
     `<div style="${css(styles.header)}">`,
     `<span style="${css(styles.headerTitle)}">Канбан</span>`,
-    `<span style="${css(styles.headerMeta)}">awg · ${CARDS.length} карточек</span>`,
+    `<span style="${css(styles.headerMeta)}">${PROJECT_NAME} · ${CARDS.length} карточек</span>`,
     `<button style="${css(styles.refresh)}" title="Обновить сейчас">⟳</button>`,
     `</div>`
   ].join("");
@@ -230,10 +232,10 @@ const frame = view === "panel"
     <aside class="left">
       <div class="brand">DeepSeek Harness</div>
       <div class="ws">Проекты</div>
-      <div class="row active"><span class="dot" style="background:#22c55e"></span>awg<span class="meta">2</span></div>
+      <div class="row active"><span class="dot" style="background:#22c55e"></span>${PROJECT_NAME}<span class="meta">2</span></div>
       <div class="row"><span class="dot" style="background:#3b82f6"></span>demo-t002<span class="meta">1</span></div>
-      <div class="row"><span class="dot" style="background:#3b82f6"></span>awg-t003<span class="meta">1</span></div>
-      <div class="ws">Сессии · awg</div>
+      <div class="row"><span class="dot" style="background:#3b82f6"></span>demo-t003<span class="meta">1</span></div>
+      <div class="ws">Сессии · ${PROJECT_NAME}</div>
       <div class="row active"><span class="dot" style="background:#f59e0b"></span>Диспетчер<span class="meta">сейчас</span></div>
       <div class="row"><span class="dot" style="background:#94a3b8"></span>Верификатор</div>
     </aside>

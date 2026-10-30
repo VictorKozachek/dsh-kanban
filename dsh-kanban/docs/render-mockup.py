@@ -350,7 +350,7 @@ def build_board(styles, columns, theme, cards, header_width):
     canvas.text(header_pad_x, header_pad_y + 1, "Канбан", header_font, text)
     title_w = measure(draw, "Канбан", header_font)
     canvas.text(header_pad_x + title_w + 10, header_pad_y + 2,
-                f"awg · {len(cards)} карточек", meta_font, composite(text, 0.6, panel_bg))
+                f"demo-project · {len(cards)} карточек", meta_font, composite(text, 0.6, panel_bg))
     button_w, button_h = 26, base * LINE_FACTOR
     border_w, border_c = border_of(styles["refresh"], panel_bg, text)
     canvas.rect(header_width - header_pad_x - button_w, header_pad_y, button_w, button_h,
@@ -515,7 +515,7 @@ def build_frame(board, board_w, board_h, view, theme):
     canvas.line(left_w, 0, left_w, height, line, 1)
     canvas.text(12, 16, "DeepSeek Harness", f12, text)
     canvas.text(12, 52, "ПРОЕКТЫ", f10, composite(text, 0.4, panel))
-    rows = [("awg", "#22c55e", "2", True), ("awg-t002", "#3b82f6", "1", False), ("awg-t003", "#3b82f6", "1", False)]
+    rows = [("demo-project", "#22c55e", "2", True), ("demo-t002", "#3b82f6", "1", False), ("demo-t003", "#3b82f6", "1", False)]
     y = 72
     for name, color, badge, active in rows:
         if active:
@@ -524,7 +524,7 @@ def build_frame(board, board_w, board_h, view, theme):
         canvas.text(31, y, name, f12, text)
         canvas.text(left_w - 16, y + 1, badge, f10, composite(text, 0.5, panel), anchor="ra")
         y += 28
-    canvas.text(12, y + 16, "СЕССИИ · AWG", f10, composite(text, 0.4, panel))
+    canvas.text(12, y + 16, "СЕССИИ · DEMO", f10, composite(text, 0.4, panel))
     y += 36
     for name, color, badge, active in [("Диспетчер", "#f59e0b", "сейчас", True), ("Верификатор", "#94a3b8", "", False)]:
         if active:
@@ -563,7 +563,7 @@ def build_frame(board, board_w, board_h, view, theme):
     my = message("Завёл карточки 002–005 и три worktree. Воркеры в работе, четвёртая задача ждёт верификатора.", my, False)
     mono = font(11.5, mono=True)
     for tool in ['$ bin/task-new.sh "Колонки, карточки и опрос .kanban/tasks"',
-                 "задача 002: .kanban/tasks/002.md · worktree awg-t002 (task/002)"]:
+                 "задача 002: .kanban/tasks/002.md · worktree demo-t002 (task/002)"]:
         box_w = conv_w - 36
         canvas.rect(cx + 18, my, box_w, 26, radius=8, fill=panel, outline=line, line=1)
         canvas.text(cx + 27, my + 6, ellipsize(canvas.draw, tool, mono, box_w - 18), mono,

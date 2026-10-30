@@ -218,7 +218,7 @@ const card = parseCard(
     "status: testing",
     'owner: "session-abc"',
     'branch: "task/007"',
-    'worktree: "/tmp/awg-t007"',
+    'worktree: "/tmp/demo-t007"',
     'spec: "001"',
     'note: "тесты 12/12"',
     "---",
@@ -323,10 +323,10 @@ const manifest = {
   version: 1,
   updated: "2026-09-23T16:00:00Z",
   cards: [
-    "/tmp/awg-t007/.kanban/tasks/007.md",
-    "/tmp/awg-t009/.kanban/tasks/009.md",
-    "/tmp/awg-t010/.kanban/tasks/010.md",
-    "/tmp/awg-t011/.kanban/tasks/011.md"
+    "/tmp/demo-t007/.kanban/tasks/007.md",
+    "/tmp/demo-t009/.kanban/tasks/009.md",
+    "/tmp/demo-t010/.kanban/tasks/010.md",
+    "/tmp/demo-t011/.kanban/tasks/011.md"
   ]
 };
 const files = {
@@ -334,9 +334,9 @@ const files = {
   ".kanban/tasks/007.md": "---\nid: 007\ntitle: Седьмая (старая копия)\nstatus: todo\nupdated: 2026-09-23T15:00:00Z\n---\n",
   ".kanban/tasks/001.md": readText["001.md"],
   // из ветки приходит более свежий статус той же задачи
-  "/tmp/awg-t007/.kanban/tasks/007.md": "---\nid: 007\ntitle: Седьмая\nstatus: in-progress\nowner: sess-7\nbranch: task/007\nupdated: 2026-09-23T16:10:00Z\n---\n",
+  "/tmp/demo-t007/.kanban/tasks/007.md": "---\nid: 007\ntitle: Седьмая\nstatus: in-progress\nowner: sess-7\nbranch: task/007\nupdated: 2026-09-23T16:10:00Z\n---\n",
   // новая задача, которой в основном чекауте ещё нет
-  "/tmp/awg-t009/.kanban/tasks/009.md": "---\nid: 009\ntitle: Девятая из ветки\nstatus: testing\nupdated: 2026-09-23T16:20:00Z\n---\n"
+  "/tmp/demo-t009/.kanban/tasks/009.md": "---\nid: 009\ntitle: Девятая из ветки\nstatus: testing\nupdated: 2026-09-23T16:20:00Z\n---\n"
 };
 const mergeRemote = {
   workspaceFiles: {
@@ -353,7 +353,7 @@ const mergeRemote = {
     }),
     read: async (_sessionId, path) => {
       if (path in files) return { ok: true, value: { text: files[path], lines: 5, eof: true } };
-      if (path === "/tmp/awg-t010/.kanban/tasks/010.md") {
+      if (path === "/tmp/demo-t010/.kanban/tasks/010.md") {
         return { ok: false, error: { code: "workspace-file/not-found" } };
       }
       return { ok: false, error: { code: "workspace-file/too-large", message: "файл слишком большой" } };
@@ -368,12 +368,12 @@ assert.deepEqual([...Object.keys(byId)].sort(), ["001", "007", "009"], "долж
 assert.equal(byId["007"].status, "in-progress", "из ветки приходит более свежий статус");
 assert.equal(byId["007"].owner, "sess-7");
 assert.equal(byId["007"].source, "worktree");
-assert.equal(byId["007"].path, "/tmp/awg-t007/.kanban/tasks/007.md");
+assert.equal(byId["007"].path, "/tmp/demo-t007/.kanban/tasks/007.md");
 assert.equal(byId["001"].source, "main");
 assert.equal(byId["009"].source, "worktree");
 assert.deepEqual(
   [...merged.value.problems],
-  ["/tmp/awg-t011/.kanban/tasks/011.md: workspace-file/too-large: файл слишком большой"],
+  ["/tmp/demo-t011/.kanban/tasks/011.md: workspace-file/too-large: файл слишком большой"],
   "исчезнувший worktree (not-found) молчит, настоящая ошибка видна"
 );
 assert.ok(!("010" in byId), "карточка из исчезнувшего worktree не появляется");

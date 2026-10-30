@@ -35,7 +35,12 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+# python3 с Pillow запоминаем ДО подмены PATH: каталог node (например
+# /opt/homebrew/bin) может содержать свой python3 без PIL, и тогда painter
+# падает на `import PIL`, хотя рабочий python3 в PATH есть (#056, та же ловушка).
+PYTHON3="$(command -v python3)"
+
 # Painter зовёт `node` из PATH, чтобы достать стили плагина: подкладываем
 # найденный Node первым в PATH — PATH сессии урезан и Homebrew-ноды в нём нет.
 NODE_DIR="$(dirname "$("$ROOT/bin/node.sh" --which)")"
-PATH="$NODE_DIR:$PATH" python3 "$ROOT/dsh-kanban/docs/render-mockup.py"
+PATH="$NODE_DIR:$PATH" "$PYTHON3" "$ROOT/dsh-kanban/docs/render-mockup.py"

@@ -13,13 +13,16 @@
       config:
         # Корни проектов, где сторож следит за .kanban/tasks.
         boards:
-          - /Users/victor/projects/dsh-kanban
+          # Путь к проекту, где живёт доска. `!!js` вычисляется при загрузке
+          # профиля: имя пользователя в публичном репозитории не нужно, а
+          # подправить путь можно здесь или подложить свои корни профилем.
+          - !!js process.env.HOME + '/projects/dsh-kanban'
         # Деревья, под которыми сторож сам находит доски каждого воркспейса:
         # каждая папка с .kanban/tasks получает собственный сторож, свою карту
         # ролей (.kanban/.watcher-roles.json) и свои наряды — только внутри
         # этой папки.
         roots:
-          - /Users/victor/projects/ai-fabric/aif-project
+          - !!js process.env.HOME + '/projects/ai-fabric/aif-project'
         # Роли новых воркспейсов сторож подхватывает сам по выбору пресета
         # (agent-preset/selected → .kanban/.watcher-roles.json); блок `roles`
         # намеренно не используется, чтобы не перекрывать автокарту.
