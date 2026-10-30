@@ -163,7 +163,7 @@ against one board without chatting with each other.
 
 ## Numbers
 
-47 tasks merged, ~4,300 lines of plugin code, ~5,100 lines of tests,
+48 tasks merged, ~4,300 lines of plugin code, ~5,100 lines of tests,
 19 scripts, 408 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
