@@ -22,6 +22,7 @@
 | `dsh-kanban/lib/watcher-core.js` | Чистая часть сторожа: разбор карточек, снимок доски, правила нарядов |
 | `dsh-kanban/lib/backlog-notices.js` | Чистые правила нарядов бэклога: асайн карточки в `todo` с владельцем и сигнал о недоборе `todo` |
 | `dsh-kanban/lib/card-actions.js` | Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo → backlog` из GUI, host-служба `kanbanCardActions` (Typert Remote в SRC-режиме), запуск `bin/task-assign.sh` |
+| `dsh-kanban/lib/children.js` | Обзор дочерних досок: host-служба `kanbanChildren` (только чтение) — разбор `.kanban/children.json`, снимок доски ребёнка со слиянием карточек из worktree |
 | `dsh-kanban/cordis.patch.yml` | Патч-слой пакета: вставляет свой Loader-ряд |
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
 | `dsh-kanban/test/render.test.mjs` | Тест рендера: контекст, колонки, карточки, зачёркивание в `merged`, панель деталей (открытие, переключение, закрытие) |
@@ -30,6 +31,8 @@
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
 | `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
 | `dsh-kanban/test/shutdown.test.mjs` | Регрессия dispose: после выгрузки нет живых `fs.watch`/таймеров, in-flight наряд и дочерний `task-assign.sh` отменяются, повторный dispose безопасен, бюджет 200 мс на десятках досок |
+| `dsh-kanban/test/children.test.mjs` | Тест host-логики обзора детей: манифест с относительными и абсолютными путями, слияние с worktree, изоляция ошибок досок, счётчики, только чтение |
+| `dsh-kanban/test/children-render.test.mjs` | Тест вкладки «Дочерние доски»: регистрация второго таба, дерево досок, счётчики, drill-down и пустые состояния, отсутствие элементов переноса |
 | `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
 | `bin/test.sh` | Прогнать все проверки набора |
 | `.kanban/tasks/` | Карточки задач: один `<id>.md` на задачу |
