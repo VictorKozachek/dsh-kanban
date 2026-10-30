@@ -63,6 +63,7 @@ import {
   runAssignScript,
   sessionCwdFromContext,
 } from "./card-actions.js";
+import { registerChildrenService } from "./children.js";
 
 /** Сервис, которым GUI отправляет сообщение в сессию. */
 export const inject = ["sessionController"];
@@ -466,6 +467,8 @@ export function apply(ctx, config = {}) {
     let channelProbe = null;
     /** Регистрация службы канала: снимаем её сами, не надеясь на порядок unload. */
     let channelRegistration = null;
+    /** Регистрация службы обзора дочерних досок (#059): снимается там же, где канал. */
+    let childrenRegistration = null;
 
     /**
      * Единый cleanup плагина: отмена доставок и детей, закрытие наблюдателей и
@@ -522,6 +525,12 @@ export function apply(ctx, config = {}) {
         log(ctx, "warn", `канал асайна не снялся: ${error?.message ?? error}`);
       }
       channelRegistration = null;
+      try {
+        void childrenRegistration?.dispose?.();
+      } catch (error) {
+        log(ctx, "warn", `служба обзора детей не снялась: ${error?.message ?? error}`);
+      }
+      childrenRegistration = null;
     };
 
     // Регистрация cleanup — через `ctx.effect`: cordis вызывает возвращённый
@@ -550,6 +559,18 @@ export function apply(ctx, config = {}) {
       });
     } catch (error) {
       log(ctx, "warn", `канал асайна не поднялся: ${error?.message ?? error}`);
+    }
+
+    // Обзор дочерних досок (#059): только чтение манифеста `.kanban/children.json`
+    // из каталога сессии. Регистрируется независимо от `boards`/`roots`: обзору
+    // конфиг сторожа не нужен, только каталог сессии.
+    try {
+      childrenRegistration = registerChildrenService(ctx, {
+        resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),
+        log: (level, message) => log(ctx, level, message),
+      });
+    } catch (error) {
+      log(ctx, "warn", `служба обзора детей не поднялась: ${error?.message ?? error}`);
     }
 
     // Эффективные карты ролей: на каждую доску своя, чтобы ревьювер одного

@@ -28,6 +28,8 @@ echo "== рендер доски (регистрация в контексте, 
 "$NODE" "$ROOT/dsh-kanban/test/worktree-watch.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/mockup.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/merge.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/children.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/children-render.test.mjs"
 
 echo "== макет: проверки painter'а (высота карточки и предел чипа владельца)"
 if command -v python3 >/dev/null 2>&1; then

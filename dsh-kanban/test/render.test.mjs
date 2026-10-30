@@ -293,8 +293,12 @@ async function renderBoard(remote) {
 const { captured, tree, text, body, props } = await renderBoard(makeRemote());
 
 // Регистрация в контексте
-assert.equal(captured.tabTypes.length, 1, "должен регистрироваться ровно один тип таба");
-const tabType = captured.tabTypes[0];
+// Плагин регистрирует две вкладки: «Канбан» (#047) и «Дочерние доски» (#059).
+// Вторая проверяется в children-render.test.mjs, здесь — только что первая цела.
+assert.equal(captured.tabTypes.length, 2, "должны регистрироваться два типа табов");
+const tabType = captured.tabTypes.find((type) => type.id === "dsh-kanban");
+assert.ok(tabType, "нет типа таба dsh-kanban");
+assert.equal(captured.tabTypes.find((type) => type.id === "dsh-kanban-children")?.kind, "kanban-children");
 assert.equal(tabType.id, "dsh-kanban");
 assert.equal(tabType.kind, "kanban");
 assert.equal(tabType.priority, "extension");
@@ -302,7 +306,8 @@ assert.equal(typeof tabType.title, "function");
 assert.equal(tabType.title(""), "Канбан");
 assert.equal(tabType.guide.length, 1, "тип таба должен предлагать себя на странице-гиде");
 assert.ok(captured.dicts.kanban && captured.dicts.kanban.ru, "словари ru/en должны регистрироваться");
-assert.equal(captured.titles.length, 1, "заголовок таба должен регистрироваться");
+assert.equal(captured.titles.length, 2, "у каждой из двух вкладок свой заголовок");
+assert.ok(captured.titles.some((item) => item.key === "dsh-kanban"), "нет заголовка вкладки «Канбан»");
 
 // Закрытые задачи: название зачёркнуто, и только у них (в фикстурах merged один).
 // Панель деталей: содержимое карточки с описанием и комментариями.
@@ -440,7 +445,7 @@ assert.equal(panelNode.props.style.position, "sticky", "панель должн�
 
 const struck = collectStyles(tree).filter((style) => style.textDecoration === "line-through");
 assert.equal(struck.length, 1, "зачёркнутым должно быть ровно название карточки в merged");
-assert.equal(captured.titles[0].key, "dsh-kanban");
+assert.ok(captured.titles.some((item) => item.key === "dsh-kanban"));
 
 // Отрисовка
 assert.match(text, /Канбан/, "в дереве есть заголовок доски");

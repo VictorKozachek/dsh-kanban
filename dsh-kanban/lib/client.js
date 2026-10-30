@@ -558,6 +558,63 @@ window.__ModuleLoader__.load({
       });
     }
 
+    /** Идентификатор второй вкладки плагина: «Дочерние доски» (спека 004). */
+    const CHILDREN_ID = "dsh-kanban-children";
+    /** Дискриминатор типа второй вкладки. */
+    const CHILDREN_KIND = "kanban-children";
+    /** Namespace host-службы обзора: endpoint — `<namespace>/read`. */
+    const CHILDREN_NAMESPACE = "kanbanChildren";
+    /** Команда, которой родитель собирает манифест (подсказка в пустом состоянии). */
+    const CHILDREN_COMMAND = "bin/board-children.sh --root <дерево>";
+    /** Отступ уровня дерева в пикселях. */
+    const TREE_INDENT = 14;
+
+    /**
+     * Читатель обзора дочерних досок: host-служба `kanbanChildren` (#059).
+     *
+     * Клиент файловую систему детей не трогает (листинг вне workspace ему и не
+     * разрешён) — всё читает хост и отдаёт уже готовый снимок. Канал только
+     * читающий: аргумент один — `sessionId`.
+     */
+    function createChildrenReader(connection) {
+      return async function readChildren(sessionId, signal) {
+        if (!connection || !connection.rpc || typeof connection.rpc.call !== "function") {
+          return { ok: false, offline: true, error: "" };
+        }
+        let envelope;
+        try {
+          envelope = await connection.rpc.call(
+            "/api",
+            CHILDREN_NAMESPACE + "/read",
+            { args: { request: { sessionId } } },
+            signal
+          );
+        } catch (error) {
+          return { ok: false, error: describeError(error) };
+        }
+        if (!envelope || envelope.ok !== true) {
+          return { ok: false, error: envelope && envelope.error ? describeError(envelope.error) : "" };
+        }
+        const result = envelope.value;
+        if (!result || typeof result !== "object") return { ok: false, error: "" };
+        if (result.ok !== true) return { ok: false, error: String(result.message || "") };
+        const payload = result.value || {};
+        return {
+          ok: true,
+          value: {
+            boards: Array.isArray(payload.boards) ? payload.boards : [],
+            problems: Array.isArray(payload.problems) ? payload.problems : [],
+            manifest: String(payload.manifest || "")
+          }
+        };
+      };
+    }
+
+    /** Лицо вкладки: превращает читатель в prop `readChildren` тела слота. */
+    function childrenFace(readChildren) {
+      return (sessionId) => ({ readChildren: (signal) => readChildren(sessionId, signal) });
+    }
+
     /** Инлайн-стили: тема не нужна, цвет наследуем у оболочки через currentColor. */
     const HAIRLINE = "color-mix(in srgb, currentColor 12%, transparent)";
     const styles = {
@@ -611,6 +668,19 @@ window.__ModuleLoader__.load({
       meta: { fontSize: 10, opacity: 0.6, wordBreak: "break-all" },
       note: { fontSize: 10, color: "#f97316", wordBreak: "break-word" },
       empty: { padding: "14px 12px", opacity: 0.7, fontSize: 11, maxWidth: 420 },
+      // Вкладка «Дочерние доски»: дерево досок read-only.
+      tree: { display: "flex", flexDirection: "column", gap: 6, padding: 8, overflowY: "auto", flex: 1, minHeight: 0 },
+      boardRow: { display: "flex", flexDirection: "column", gap: 4, padding: "6px 8px", border: "1px solid " + HAIRLINE, borderRadius: 8, background: "color-mix(in srgb, currentColor 4%, transparent)", cursor: "pointer" },
+      boardRowTop: { display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" },
+      boardTitle: { fontSize: 12, fontWeight: 600 },
+      boardCounters: { display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" },
+      counter: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, opacity: 0.8, whiteSpace: "nowrap" },
+      missingBadge: { fontSize: 10, padding: "1px 5px", borderRadius: 999, background: "color-mix(in srgb, #ef4444 16%, transparent)", border: "1px solid color-mix(in srgb, #ef4444 35%, transparent)" },
+      boardCards: { display: "flex", flexDirection: "column", gap: 2, paddingTop: 2 },
+      boardCardLine: { display: "flex", alignItems: "baseline", gap: 6, fontSize: 11, flexWrap: "wrap" },
+      boardCardTitle: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+      drill: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, gap: 6 },
+      drillHead: { display: "flex", alignItems: "baseline", gap: 8, padding: "0 10px", flexWrap: "wrap" },
       mono: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11 }
     };
 
@@ -1107,6 +1177,428 @@ window.__ModuleLoader__.load({
       return h("span", null, props.t ? props.t("title") : "Kanban");
     }
 
+    // ── вкладка «Дочерние доски» (спека 004, задача #059) ─────────────────────
+    //
+    // Только чтение: родитель смотрит, как идут задачи у детей, но не управляет
+    // ими. Поэтому здесь нет ни перетаскивания, ни кнопок перевода, ни тоста
+    // «переношу…» — асайн и переходы остаются у ролей дочерней доски.
+
+    /** Сегменты пути доски: по ним считается уровень в дереве. */
+    function boardSegments(value) {
+      return String(value == null ? "" : value)
+        .replace(/[/\\]+$/, "")
+        .split(/[/\\]/)
+        .filter(Boolean);
+    }
+
+    /** Отступ доски в дереве: уровень относительно самой верхней доски списка. */
+    function boardDepth(boards, value) {
+      const lengths = (boards || []).map((board) => boardSegments(board.path).length);
+      const base = lengths.length > 0 ? Math.min.apply(null, lengths) : 0;
+      return Math.max(0, boardSegments(value).length - base);
+    }
+
+    /** Счётчики доски: `counts` от хоста, а если его нет — считаем по карточкам. */
+    function childrenCounts(board) {
+      if (board && board.counts && typeof board.counts === "object") return board.counts;
+      const counts = {};
+      for (const column of COLUMNS) counts[column.id] = 0;
+      for (const card of (board && board.cards) || []) {
+        if (Object.prototype.hasOwnProperty.call(counts, card.status)) counts[card.status] += 1;
+      }
+      return counts;
+    }
+
+    /** Карточки «в работе»: из ответа хоста либо из карточек доски. */
+    function childrenInProgress(board) {
+      if (Array.isArray(board && board.inProgress)) return board.inProgress;
+      return ((board && board.cards) || []).filter((card) => card.status === "in-progress");
+    }
+
+    /** Строка счётчиков доски: по значку на непустой статус. */
+    function childrenCounters(board, t) {
+      const counts = childrenCounts(board);
+      const nodes = [];
+      for (const column of COLUMNS) {
+        if (column.id === "merged") continue;
+        const value = counts[column.id] || 0;
+        if (value === 0) continue;
+        nodes.push(
+          h(
+            "span",
+            { key: column.id, style: styles.counter, title: t("column." + column.id), "data-kanban-children-count": column.id },
+            h("span", { style: Object.assign({}, styles.dot, { background: column.color }) }),
+            t("column." + column.id) + " " + value
+          )
+        );
+      }
+      return nodes;
+    }
+
+    /** Read-only карточка доски ребёнка: ни перетаскивания, ни кнопок перевода. */
+    function ChildrenCard({ card, t, onSelect, selected }) {
+      const column = COLUMN_BY_ID[card.status] || COLUMN_BY_ID.todo;
+      return h(
+        "div",
+        {
+          style: selected ? Object.assign({}, styles.card, styles.cardSelected) : Object.assign({}, styles.card, { borderLeftColor: column.color }),
+          "data-kanban-children-card-id": String(card.id),
+          onClick: () => onSelect && onSelect(card),
+          role: "button",
+          tabIndex: 0
+        },
+        h(
+          "div",
+          { style: styles.cardTop },
+          h("span", { style: styles.cardId }, "#" + card.id),
+          card.source === "worktree"
+            ? h("span", { key: "branch", style: styles.branchBadge, title: card.worktree || "" }, t("inBranch"))
+            : null,
+          card.owner
+            ? h("span", { style: styles.owner, title: card.owner }, shortOwner(card.owner))
+            : h("span", { style: styles.ownerEmpty }, t("noOwner"))
+        ),
+        h("div", { style: styles.cardTitle }, card.title),
+        card.updated ? h("div", { style: styles.meta }, card.updated) : null
+      );
+    }
+
+    /** Панель деталей карточки ребёнка: описание, расход, роль, spec — без действий. */
+    function ChildrenCardDetails({ card, t, onClose }) {
+      const rows = [];
+      if (hasTokens(card)) {
+        const breakdown = Object.entries(card.usage || {})
+          .map(([role, value]) => role + ": " + formatTokens(value))
+          .join("; ");
+        rows.push(
+          h(
+            "div",
+            { key: "tokens", style: styles.detailsRow },
+            h("span", { style: styles.detailsLabel }, t("tokens") + ":"),
+            h("span", null, formatTokens(card.tokens) + (breakdown ? " (" + breakdown + ")" : ""))
+          )
+        );
+      }
+      const who = [card.role ? roleLabel(card.role, t) : "", card.owner || t("noOwner")].filter(Boolean).join(" · ");
+      rows.push(
+        h(
+          "div",
+          { key: "who", style: styles.detailsRow },
+          h("span", { style: styles.detailsLabel }, t("session") + ":"),
+          h("span", { title: card.owner || "" }, who)
+        )
+      );
+      if (card.updated) {
+        rows.push(
+          h(
+            "div",
+            { key: "updated", style: styles.detailsRow },
+            h("span", { style: styles.detailsLabel }, t("children.updated") + ":"),
+            h("span", null, card.updated)
+          )
+        );
+      }
+      if (card.spec) {
+        rows.push(
+          h(
+            "div",
+            { key: "spec", style: styles.detailsRow, "data-kanban-spec": card.spec },
+            h("span", { style: styles.detailsLabel }, t("spec") + ":"),
+            h("span", { title: ".kanban/specs/" + card.spec + ".md" }, ".kanban/specs/" + card.spec + ".md")
+          )
+        );
+      }
+      return h(
+        "aside",
+        { style: styles.details, "data-kanban-children-details": String(card.id) },
+        h(
+          "div",
+          { style: styles.detailsHead },
+          h("div", { style: styles.detailsTitle }, card.title),
+          h(
+            "button",
+            { type: "button", style: styles.refresh, title: t("close"), onClick: () => onClose && onClose() },
+            "✕"
+          )
+        ),
+        h("div", { style: styles.detailsRow }, h("span", { style: styles.detailsLabel }, "#" + card.id)),
+        rows,
+        h("div", { style: styles.detailsSection }, t("description")),
+        h("div", { style: styles.detailsText }, card.description || "—")
+      );
+    }
+
+    /** Тело вкладки «Дочерние доски»: сводка по дереву и read-only drill-down. */
+    function ChildrenBody(props) {
+      const t = props.t;
+      const sessionId = props.sessionId;
+      const readRef = React.useRef(props.readChildren);
+      const [state, setState] = React.useState({
+        phase: "loading",
+        boards: [],
+        problems: [],
+        manifest: "",
+        error: "",
+        offline: false
+      });
+      // Открытая доска (drill-down) и выбранная карточка (панель деталей).
+      const [openPath, setOpenPath] = React.useState(null);
+      const [cardKey, setCardKey] = React.useState(null);
+      const signature = React.useRef("");
+      const tickRef = React.useRef(null);
+
+      React.useEffect(() => {
+        readRef.current = props.readChildren;
+      }, [props.readChildren]);
+
+      React.useEffect(() => {
+        let stopped = false;
+        let timer = 0;
+        const controller = new AbortController();
+        const tick = async () => {
+          if (typeof readRef.current !== "function") return;
+          let result;
+          try {
+            result = await readRef.current(controller.signal);
+          } catch (error) {
+            result = { ok: false, error: describeError(error) };
+          }
+          if (stopped) return;
+          const ok = Boolean(result && result.ok);
+          const value = (ok && result.value) || { boards: [], problems: [], manifest: "" };
+          const next = {
+            phase: ok ? "ready" : "error",
+            boards: value.boards || [],
+            problems: value.problems || [],
+            manifest: String(value.manifest || ""),
+            error: ok ? "" : describeError(result ? result.error : null),
+            offline: Boolean(result && result.offline)
+          };
+          const fingerprint = JSON.stringify([
+            next.error,
+            next.manifest,
+            next.problems,
+            next.boards.map((board) => [board.path, board.problems, childrenCounts(board), childrenInProgress(board).length])
+          ]);
+          if (fingerprint === signature.current) return;
+          signature.current = fingerprint;
+          setState((previous) =>
+            ok
+              ? next
+              : Object.assign({}, previous, {
+                  phase: previous.boards.length ? "ready" : "error",
+                  error: next.error,
+                  offline: next.offline
+                })
+          );
+        };
+        tickRef.current = tick;
+        tick();
+        timer = setInterval(tick, POLL_MS);
+        return () => {
+          stopped = true;
+          if (timer) clearInterval(timer);
+          controller.abort();
+        };
+      }, [sessionId]);
+
+      const body = [];
+      body.push(
+        h(
+          "div",
+          { key: "header", style: styles.header },
+          h("span", { style: styles.headerTitle }, t("children.title")),
+          h(
+            "span",
+            { style: styles.headerMeta },
+            state.phase === "ready"
+              ? state.boards.length + " " + t("children.boards")
+              : t("children.loading")
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              style: styles.refresh,
+              title: t("refresh"),
+              "data-kanban-children-refresh": "1",
+              onClick: () => {
+                if (typeof tickRef.current === "function") tickRef.current();
+              }
+            },
+            "⟳"
+          )
+        )
+      );
+
+      if (state.error) {
+        body.push(
+          h(
+            "div",
+            { key: "error", style: styles.banner, "data-kanban-children-error": "1" },
+            (state.offline ? t("children.unavailable") : t("children.error")) + (state.error ? ": " + state.error : "")
+          )
+        );
+      }
+      for (const [index, problem] of state.problems.entries()) {
+        body.push(h("div", { key: "problem-" + index, style: styles.note }, problem));
+      }
+
+      // Пустые состояния: нет манифеста (подсказка с командой) и манифест без досок.
+      if (state.phase === "ready" && state.boards.length === 0) {
+        if (state.manifest === "missing") {
+          body.push(
+            h(
+              "div",
+              { key: "no-manifest", style: styles.empty, "data-kanban-children-empty": "manifest" },
+              h("div", null, t("children.noManifest")),
+              h("div", { style: styles.mono }, CHILDREN_COMMAND)
+            )
+          );
+        } else if (state.manifest === "broken") {
+          body.push(h("div", { key: "broken", style: styles.empty, "data-kanban-children-empty": "broken" }, t("children.broken")));
+        } else {
+          body.push(h("div", { key: "no-boards", style: styles.empty, "data-kanban-children-empty": "boards" }, t("children.empty")));
+        }
+      }
+
+      const openBoard = state.boards.find((board) => board.path === openPath) || null;
+      const selectedCard =
+        (openBoard && (openBoard.cards || []).find((card) => openBoard.path + "/" + card.id === cardKey)) || null;
+
+      if (openBoard) {
+        // Drill-down: колонки доски ребёнка только для чтения.
+        const columns = COLUMNS.map((column) => ({
+          column,
+          items: (openBoard.cards || []).filter((card) => card.status === column.id)
+        }));
+        const drill = [];
+        drill.push(
+          h(
+            "div",
+            { key: "drill-head", style: styles.drillHead },
+            h(
+              "button",
+              {
+                type: "button",
+                style: styles.cardAction,
+                "data-kanban-children-back": "1",
+                onClick: () => {
+                  setOpenPath(null);
+                  setCardKey(null);
+                }
+              },
+              "← " + t("children.back")
+            ),
+            h("span", { style: styles.detailsTitle }, openBoard.title),
+            h("span", { style: styles.meta, title: openBoard.absPath || "" }, openBoard.path),
+            h("span", { style: styles.headerMeta })
+          )
+        );
+        for (const [index, problem] of (openBoard.problems || []).entries()) {
+          drill.push(h("div", { key: "drill-problem-" + index, style: styles.note }, problem));
+        }
+        drill.push(
+          h(
+            "div",
+            { key: "columns", style: styles.board },
+            columns.map((entry) =>
+              h(
+                "div",
+                { key: entry.column.id, style: styles.column, "data-kanban-children-column": entry.column.id },
+                h(
+                  "div",
+                  { style: styles.columnHeader },
+                  h("span", { style: Object.assign({}, styles.dot, { background: entry.column.color }) }),
+                  h("span", null, t("column." + entry.column.id)),
+                  h("span", { style: styles.count }, String(entry.items.length))
+                ),
+                h(
+                  "div",
+                  { style: styles.columnBody },
+                  entry.items.length === 0
+                    ? h("div", { style: styles.empty }, t("children.columnEmpty"))
+                    : entry.items.map((card) =>
+                        h(ChildrenCard, {
+                          key: card.id,
+                          card,
+                          t,
+                          selected: cardKey === openBoard.path + "/" + card.id,
+                          onSelect: (picked) => setCardKey(openBoard.path + "/" + picked.id)
+                        })
+                      )
+                )
+              )
+            )
+          )
+        );
+        body.push(
+          h(
+            "div",
+            { key: "split", style: styles.split, "data-kanban-children-open": openBoard.path },
+            h("div", { key: "drill", style: styles.drill }, drill),
+            selectedCard ? h(ChildrenCardDetails, { key: "details", card: selectedCard, t, onClose: () => setCardKey(null) }) : null
+          )
+        );
+      } else if (state.phase === "ready" && state.boards.length > 0) {
+        // Сводка: дерево досок с отступом по уровням пути.
+        const rows = [];
+        for (const board of state.boards) {
+          const depth = boardDepth(state.boards, board.path);
+          const inProgress = childrenInProgress(board);
+          rows.push(
+            h(
+              "div",
+              {
+                key: "board-" + board.path,
+                style: Object.assign({}, styles.boardRow, { paddingLeft: 10 + depth * TREE_INDENT }),
+                "data-kanban-children-board": board.path,
+                "data-kanban-children-depth": String(depth),
+                role: "button",
+                tabIndex: 0,
+                onClick: () => setOpenPath(board.path)
+              },
+              h(
+                "div",
+                { style: styles.boardRowTop },
+                h("span", { style: styles.boardTitle }, board.title),
+                h("span", { style: styles.meta, title: board.absPath || "" }, board.path),
+                h("span", { style: styles.boardCounters }, childrenCounters(board, t)),
+                board.missing ? h("span", { style: styles.missingBadge }, t("children.missing")) : null
+              ),
+              inProgress.length === 0
+                ? null
+                : h(
+                    "div",
+                    { style: styles.boardCards },
+                    inProgress.map((card) =>
+                      h(
+                        "div",
+                        { key: "ip-" + card.id, style: styles.boardCardLine, "data-kanban-children-inprogress": String(card.id) },
+                        h("span", { style: styles.cardId }, "#" + card.id),
+                        h("span", { style: styles.boardCardTitle }, card.title || ""),
+                        h("span", { style: styles.meta }, [card.owner || t("noOwner"), card.role ? roleLabel(card.role, t) : ""].filter(Boolean).join(" · ")),
+                        card.updated ? h("span", { style: styles.meta }, card.updated) : null
+                      )
+                    )
+                  ),
+              (board.problems || []).map((problem, index) =>
+                h("div", { key: "bp-" + index, style: styles.note }, problem)
+              )
+            )
+          );
+        }
+        body.push(h("div", { key: "tree", style: styles.tree, "data-kanban-children-tree": "1" }, rows));
+      }
+
+      return h("div", { style: styles.root, "data-kanban-children-phase": state.phase }, body);
+    }
+
+    /** Заголовок второй вкладки. */
+    function ChildrenTitle(props) {
+      return h("span", null, props.t ? props.t("children.title") : "Child boards");
+    }
+
     const ru = {
       title: "Канбан",
       guide: "Задачи агентов: что заготовлено в бэклоге, что в очереди, что в работе, что на ревью, что на проверке и что уже влито",
@@ -1148,7 +1640,20 @@ window.__ModuleLoader__.load({
       "move.done": "перенесено",
       "move.failed": "не удалось перенести карточку",
       "move.onlyAgents": "эту карточку двигают только агенты",
-      "move.unavailable": "канал недоступен: обновите страницу, а после обновления плагина перезапустите приложение"
+      "move.unavailable": "канал недоступен: обновите страницу, а после обновления плагина перезапустите приложение",
+      "children.title": "Дочерние доски",
+      "children.guide": "Обзор досок дерева команд из .kanban/children.json: счётчики по статусам, карточки в работе и доски детей только для чтения",
+      "children.boards": "досок",
+      "children.loading": "читаю манифест…",
+      "children.error": "Обзор дочерних досок не прочитан",
+      "children.unavailable": "канал обзора недоступен: обновите страницу, а после обновления плагина перезапустите приложение",
+      "children.noManifest": "Манифеста .kanban/children.json нет. Соберите его в этой папке:",
+      "children.broken": "Манифест .kanban/children.json не разобран — исправьте JSON и обновите.",
+      "children.empty": "В манифесте нет ни одной доски.",
+      "children.missing": "нет доски",
+      "children.back": "к списку досок",
+      "children.columnEmpty": "пусто",
+      "children.updated": "обновлено"
     };
 
     const en = {
@@ -1192,7 +1697,20 @@ window.__ModuleLoader__.load({
       "move.done": "moved",
       "move.failed": "could not move the card",
       "move.onlyAgents": "only agents move this card",
-      "move.unavailable": "channel unavailable: reload the page, and restart the app after a plugin update"
+      "move.unavailable": "channel unavailable: reload the page, and restart the app after a plugin update",
+      "children.title": "Child boards",
+      "children.guide": "Overview of the team board tree from .kanban/children.json: status counters, cards in progress, and child boards read-only",
+      "children.boards": "boards",
+      "children.loading": "reading manifest…",
+      "children.error": "Child boards overview failed",
+      "children.unavailable": "overview channel unavailable: reload the page, and restart the app after a plugin update",
+      "children.noManifest": "No .kanban/children.json manifest. Build it in this folder:",
+      "children.broken": ".kanban/children.json is not valid JSON — fix it and refresh.",
+      "children.empty": "The manifest lists no boards.",
+      "children.missing": "board missing",
+      "children.back": "back to boards",
+      "children.columnEmpty": "empty",
+      "children.updated": "updated"
     };
 
     /** Сервисы Cordis, без которых `apply` не запускается. */
@@ -1218,6 +1736,38 @@ window.__ModuleLoader__.load({
       const loadBoard = createLoader(ctx.remote);
       // Канал перемещения карточки живёт на хосте (#047): клиент только читает файлы.
       const moveCard = createCardMover(ctx.connection);
+
+      // Вторая вкладка — «Дочерние доски» (#059): только чтение, поэтому у неё
+      // нет ни канала перемещения, ни обработчиков drag&drop.
+      ctx.effect(
+        () =>
+          ctx.sidebarRightTabs.register({
+            id: CHILDREN_ID,
+            kind: CHILDREN_KIND,
+            priority: "extension",
+            title: () => t("children.title"),
+            guide: [{ order: 31, title: () => t("children.title"), description: () => t("children.guide") }]
+          }),
+        "dsh-kanban: children tab type"
+      );
+      const readChildren = createChildrenReader(ctx.connection);
+      ctx.effect(
+        () =>
+          ctx.slots.inject("sidebar.right.pane.tab", () =>
+            ctx.slots.register(
+              { name: "sidebar.right.pane.tab", key: CHILDREN_ID, locale: NS, inject: childrenFace(readChildren) },
+              ChildrenBody
+            )
+          ),
+        "dsh-kanban: children body"
+      );
+      ctx.effect(
+        () =>
+          ctx.slots.inject("sidebar.right.pane.tab.title", () =>
+            ctx.slots.register({ name: "sidebar.right.pane.tab.title", key: CHILDREN_ID, locale: NS }, ChildrenTitle)
+          ),
+        "dsh-kanban: children title"
+      );
       ctx.effect(
         () =>
           ctx.slots.inject("sidebar.right.pane.tab", () =>
@@ -1241,7 +1791,36 @@ window.__ModuleLoader__.load({
     exports.inject = inject;
     // Внутренности для тестов и генератора макета (dsh-kanban/test,
     // dsh-kanban/docs): рантайм DSH их не использует, браузеру они не мешают.
-    exports.__internals = { parseCard, parseFrontMatter, normalizeStatus, createLoader, readManifest, listWorktreeCards, isNewer, compareCards, splitCardBody, createCardMover, CARD_ACTIONS, CARD_DROPS, CardDetails, styles, COLUMNS };
+    exports.__internals = {
+      parseCard,
+      parseFrontMatter,
+      normalizeStatus,
+      createLoader,
+      readManifest,
+      listWorktreeCards,
+      isNewer,
+      compareCards,
+      splitCardBody,
+      createCardMover,
+      CARD_ACTIONS,
+      CARD_DROPS,
+      CardDetails,
+      styles,
+      COLUMNS,
+      // Вкладка «Дочерние доски» (#059): читатель, лицо и компоненты — только чтение.
+      createChildrenReader,
+      childrenFace,
+      boardDepth,
+      childrenCounts,
+      childrenInProgress,
+      ChildrenBody,
+      ChildrenTitle,
+      ChildrenCard,
+      ChildrenCardDetails,
+      CHILDREN_ID,
+      CHILDREN_KIND,
+      CHILDREN_COMMAND
+    };
     return module.exports;
   }
 });
