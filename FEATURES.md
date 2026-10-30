@@ -1,6 +1,6 @@
 # dsh-kanban features
 
-[Русская версия](FEATURES.ru.md) · state as of 2026-10-29 (main, DSH 0.2.1-rc.3)
+[Русская версия](FEATURES.ru.md) · state as of 2026-10-30 (main, DSH 0.2.1-rc.3)
 
 **What it is.** A Kanban board for agent tasks in the DeepSeek Harness right
 sidebar. Task state lives in `.kanban/tasks/*.md` inside the project's git
@@ -30,6 +30,14 @@ against one board without chatting with each other.
   re-read on success, and a banner shows the host's refusal text ("all
   executors are busy", "card is in status …") or "channel unavailable" when
   disconnected.
+- **Second tab, "Child boards"** — an overview of the team tree's boards
+  (read-only): a tree indented by path, per-status card counters (without
+  `merged`), cards "in progress" with owner/role and update time, and a
+  per-board read error on its own line; clicking a board opens its columns,
+  clicking a card opens details (description, tokens, role/owner, `spec`).
+  Refresh is polling every 3 s plus ⟳; empty states are distinct: no manifest
+  (with a `bin/board-children.sh` hint), manifest not parsed, no boards. There
+  is no drag&drop and no move buttons here: the parent looks, it does not manage.
 - **Refresh:** polling every 3 seconds plus a ⟳ button; light and dark themes;
   board mockups live in `dsh-kanban/docs/` and are rendered from the real style
   table.
@@ -66,6 +74,13 @@ against one board without chatting with each other.
   remote): GUI `assign`/`unassign`, runs `bin/task-assign.sh` without a shell,
   validates requests, serializes assignments, verifies that the card actually
   changed, and cancels work when the plugin is unloaded.
+- **Child boards overview** `kanbanChildren` (a read-only Typert remote):
+  `read` with `{ request: { sessionId } }` reads `.kanban/children.json` from the
+  session directory, snapshots every board (`.kanban/tasks` plus
+  `worktrees/*`, cards merged by `updated` freshness like the watcher) and
+  returns counters; a single board's failure lands in its `problems`/`missing`
+  and does not fail the rest; limits are 200 boards and 2,000 cards, and there
+  are no mutating arguments at all.
 - **Channel self-check** after startup: "sees the endpoint" / "not verified —
   gateway not ready yet" / "not announced", with distinct log levels.
 - **Graceful shutdown:** disposal via `ctx.effect` closes watchers and timers,
@@ -100,7 +115,7 @@ against one board without chatting with each other.
 | Group | Scripts |
 |---|---|
 | Tasks | `task-new` (worktree + branch + card, `--backlog`, `--spec`), `task-move` (validated transitions), `task-commit` (merge and `--no-merge`), `task-assign` (assign/unassign), `backlog-fill`, `spec-new`, `task-usage` (tokens from the DSH projection cache) |
-| Board | `board-status` (dump, `--json`), `board-sync` (manifest for worktrees outside the project) |
+| Board | `board-status` (dump, `--json`), `board-sync` (manifest for worktrees outside the project), `board-children` (child boards manifest: `--root`, `--depth`, `--base`, `--board`, `--print`) |
 | Installation | `install-kanban` (web/desktop profiles, guards against double mounting), `install-presets`, `gen-role-presets` (presets generated from the built-in `standard` preset) |
 | Quality | `test.sh` (whole suite), `test-scripts.sh` (scripts, locales, exit codes), `host-shutdown-check.mjs` (real Host: control/board/roots/events), `render-mockup.sh`, `node.sh` |
 
@@ -117,16 +132,17 @@ against one board without chatting with each other.
 
 ## 6. Tests, mockups, documentation
 
-- **10 test files** plus `bin/test-scripts.sh`: **352 checks** in `bin/test.sh` —
+- **12 test files** plus `bin/test-scripts.sh`: **408 checks** in `bin/test.sh` —
   browserless rendering, card parser, worktree copy merging, notices, worktree
-  observation, the command channel, dispose/shutdown, scripts, locales. There is
-  also a separate slow harness for a real Host process (not part of the suite).
+  observation, the command channel, dispose/shutdown, child boards overview
+  (service and tab), scripts, locales. There is also a separate slow harness for
+  a real Host process (not part of the suite).
 - Mockups in `docs/` are rendered from the real `client.js` style table; checks
   keep the file table in `KANBAN.md` truthful and complete.
 - Documentation: `KANBAN.md` (overview, installation, scenarios, limits,
   troubleshooting), `AGENTS.md` (agent protocol), `.kanban/tasks/README.md`
-  (card format), specs `001`–`003` (backlog and issuance; human in the loop;
-  graceful shutdown), and the `kanban` and `commit` skills.
+  (card format), specs `001`–`004` (backlog and issuance; human in the loop;
+  graceful shutdown; child boards), and the `kanban` and `commit` skills.
 
 ## 7. Boundaries: what is not here
 
@@ -134,6 +150,12 @@ against one board without chatting with each other.
   truth, so updates are polled (every 3 s) rather than streamed.
 - Humans move cards only between `backlog` and `todo`; drag between other
   columns, priorities, deadlines and mobile DnD are not supported.
+- **Child boards are read-only:** the parent sees the tree summary and opens
+  child boards without buttons or drag&drop; assignment and transitions belong
+  to the child board's team. Read-only is a service and UI guarantee, not a
+  sandbox: if child boards live inside the parent's workspace, the parent can
+  physically write to them with bash; keep the dashboard workspace outside the
+  child tree for hard isolation.
 - The set is self-contained: there are no external copies, mirrors or
   synchronisation with other projects — this repository is the only source, and
   `bin/test.sh` is fully green.
@@ -141,8 +163,8 @@ against one board without chatting with each other.
 
 ## Numbers
 
-45 tasks merged, ~3,200 lines of plugin code, ~4,100 lines of tests,
-18 scripts, 352 checks in the suite (all green).
+47 tasks merged, ~4,300 lines of plugin code, ~5,100 lines of tests,
+19 scripts, 408 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
 
