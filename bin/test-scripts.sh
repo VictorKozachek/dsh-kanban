@@ -1560,6 +1560,153 @@ else
   fail "код $code, вывод: $(head -1 "$WORK/out61")"
 fi
 
+echo "== дочерние доски: манифест дерева (bin/board-children.sh)"
+children="$WORK/children"
+children_script="$ROOT/bin/board-children.sh"
+children_mkboard() { mkdir -p "$1/.kanban/tasks"; }
+children_mkboard "$children/tree"
+children_mkboard "$children/tree/a"
+children_mkboard "$children/tree/a/b"
+children_mkboard "$children/tree/a/b/c"
+children_mkboard "$children/tree/other"
+children_mkboard "$children/tree/worktrees/001"
+children_mkboard "$children/tree/node_modules/pkg"
+children_mkboard "$children/tree/.git/hooks"
+children_mkboard "$children/tree/.idea/workspace"
+children_mkboard "$children/outside"
+# Физический путь: скрипт нормализует доски через pwd -P, а на macOS /var —
+# симлинк на /private/var, и логический путь не совпал бы сам с собой.
+children_outside="$(cd "$children/outside" && pwd -P)"
+
+# Пути и заголовки из манифеста: по строке на доску.
+children_paths() {
+  python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+print("\n".join(board["path"] for board in data["boards"]))
+' "$1"
+}
+children_titles() {
+  python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+print("\n".join(board["title"] for board in data["boards"]))
+' "$1"
+}
+
+children_default="$children/default.json"
+children_code=0
+"$children_script" --root "$children/tree" --print >"$children_default" 2>"$WORK/children0" || children_code=$?
+children_expected="$(printf '%s\n' . a a/b a/b/c other)"
+if [[ "$children_code" == "0" ]] && [[ "$(children_paths "$children_default" 2>/dev/null)" == "$children_expected" ]]; then
+  pass "обход находит все доски дерева и только их (глубина 4)"
+else
+  fail "обход: код $children_code, пути: $(children_paths "$children_default" 2>&1 | tr '\n' ' ')"
+fi
+if python3 -c "
+import json, sys
+data = json.load(open('$children_default'))
+sys.exit(0 if data.get('version') == 1 and [b['title'] for b in data['boards']] == ['tree', 'a', 'b', 'c', 'other'] else 1)
+"; then
+  pass "version 1 и title — последний сегмент пути (у корня — имя каталога)"
+else
+  fail "заголовки: $(children_titles "$children_default" 2>&1 | tr '\n' ' ')"
+fi
+if children_paths "$children_default" | grep -qE '(^|/)(worktrees|node_modules|\.git|\.idea)(/|$)'; then
+  fail "в манифест попали служебные каталоги"
+else
+  pass "worktrees, node_modules и скрытые каталоги пропущены"
+fi
+if [[ -e "$children/tree/.kanban/children.json" ]]; then
+  fail "--print не должен писать файл в --root"
+else
+  pass "--print не создаёт файл манифеста"
+fi
+
+children_code=0
+"$children_script" --root "$children/tree" --depth 1 --print >"$WORK/children1" 2>/dev/null || children_code=$?
+if [[ "$children_code" == "0" ]] && [[ "$(children_paths "$WORK/children1")" == "$(printf '%s\n' . a other)" ]]; then
+  pass "--depth 1 ограничивает вложенность (корень и первый уровень)"
+else
+  fail "--depth 1: $(children_paths "$WORK/children1" 2>&1 | tr '\n' ' ')"
+fi
+"$children_script" --root "$children/tree" --depth 0 --print >"$WORK/children2" 2>/dev/null
+if [[ "$(children_paths "$WORK/children2")" == "." ]]; then
+  pass "--depth 0 оставляет только корневую доску"
+else
+  fail "--depth 0: $(children_paths "$WORK/children2" 2>&1 | tr '\n' ' ')"
+fi
+
+children_out="$children/custom/manifest.json"
+if ( cd "$children" && "$children_script" --root tree --out "$children_out" >"$WORK/children3" 2>&1 ) &&
+   [[ -f "$children_out" ]] &&
+   cmp -s "$children_out" "$children_default"; then
+  pass "--out пишет в указанный путь тот же манифест, что --print"
+else
+  fail "--out: $(cat "$WORK/children3" 2>/dev/null | head -2)"
+fi
+"$children_script" --root "$children/tree" --out "$children_out" >/dev/null 2>&1
+children_sum1="$(cksum "$children_out")"
+"$children_script" --root "$children/tree" --out "$children_out" >/dev/null 2>&1
+if [[ "$children_sum1" == "$(cksum "$children_out")" ]]; then
+  pass "повторный запуск идемпотентен (тот же файл)"
+else
+  fail "идемпотентность: $children_sum1 vs $(cksum "$children_out")"
+fi
+
+"$children_script" --root "$children/tree" --base "$children" --print >"$WORK/children4" 2>/dev/null
+if [[ "$(children_paths "$WORK/children4")" == "$(printf '%s\n' tree tree/a tree/a/b tree/a/b/c tree/other)" ]]; then
+  pass "--base задаёт относительные пути (включая имя корня дерева)"
+else
+  fail "--base: $(children_paths "$WORK/children4" 2>&1 | tr '\n' ' ')"
+fi
+
+"$children_script" --root "$children/tree" --board "$children_outside" --print >"$WORK/children5" 2>/dev/null
+if children_paths "$WORK/children5" | grep -qx "$children_outside"; then
+  pass "внешняя доска (--board вне --base) пишется абсолютным путём"
+else
+  fail "внешняя доска: $(children_paths "$WORK/children5" 2>&1 | tr '\n' ' ')"
+fi
+
+"$children_script" --root "$children/tree" --board other --print >"$WORK/children6" 2>/dev/null
+children_dedup="$(children_paths "$WORK/children6")"
+if [[ "$(printf '%s\n' "$children_dedup" | grep -cx other)" == "1" ]] &&
+   [[ "$(printf '%s\n' "$children_dedup" | grep -c .)" == "5" ]]; then
+  pass "--board относительным путём разрешается от --root и не дублирует доску"
+else
+  fail "--board other: $(printf '%s\n' "$children_dedup" | tr '\n' ' ')"
+fi
+
+children_code=0
+"$children_script" --root "$children/nope" >/dev/null 2>"$WORK/children7" || children_code=$?
+if [[ "$children_code" == "2" ]] && grep -q "нет каталога --root" "$WORK/children7"; then
+  pass "несуществующий --root — код 2 и объяснение"
+else
+  fail "нет --root: код $children_code, $(head -1 "$WORK/children7")"
+fi
+children_code=0
+"$children_script" --root "$children/tree" --depth abc >/dev/null 2>"$WORK/children8" || children_code=$?
+if [[ "$children_code" == "2" ]] && grep -q -- "--depth" "$WORK/children8"; then
+  pass "мусор в --depth — код 2 и объяснение"
+else
+  fail "--depth abc: код $children_code, $(head -1 "$WORK/children8")"
+fi
+children_code=0
+"$children_script" --root "$children/tree" --depth 10 >/dev/null 2>"$WORK/children9" || children_code=$?
+if [[ "$children_code" == "2" ]]; then
+  pass "--depth вне диапазона 0…9 — код 2"
+else
+  fail "--depth 10: код $children_code"
+fi
+: > "$children/not-a-dir"
+children_code=0
+"$children_script" --root "$children/tree" --out "$children/not-a-dir/children.json" >/dev/null 2>"$WORK/children10" || children_code=$?
+if [[ "$children_code" == "1" ]] && grep -q "не удалось" "$WORK/children10"; then
+  pass "некуда писать — код 1 и объяснение"
+else
+  fail "запись: код $children_code, $(head -1 "$WORK/children10")"
+fi
+
 echo "== таблица файлов не отстаёт от набора"
 # Проверяем те же строки таблицы, что и выше: файл набора, которого в ней нет, —
 # такая же ошибка, как путь, которого нет на диске (#033). Внутренние проверки
