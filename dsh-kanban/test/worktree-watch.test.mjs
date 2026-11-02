@@ -57,6 +57,23 @@ const T2 = "2026-10-21T11:00:00Z";
 const T3 = "2026-10-21T12:00:00Z";
 
 /** Записать карточку в доску `at` (корень проекта или каталог рабочего дерева). */
+/**
+ * Записать переход и дождаться, пока сторож его увидит.
+ *
+ * Фиксированная пауза перед записью не гарантирует, что `fs.watch` уже встал: под
+ * нагрузкой он поднимается позже, и переход «теряется» — тест падал не по делу.
+ * Пишем ту же версию карточки, пока наряд не появится: `updated` не меняется,
+ * поэтому ключ доставки тот же и проверки «ровно один наряд» не ослабевают.
+ */
+async function writeUntilNoticed(write, calls, message, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (calls.length === 0 && Date.now() < deadline) {
+    write();
+    await sleep(50);
+  }
+  assert.ok(calls.length > 0, message);
+}
+
 function writeCard(at, id, status, extra = {}) {
   const dir = path.join(at, ".kanban", "tasks");
   fs.mkdirSync(dir, { recursive: true });
@@ -131,9 +148,7 @@ await check("переход карточки в рабочем дереве да
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, config(board, { catchUpMs: 5000 }));
-  await sleep(150);
-  writeCard(tree, "039", "in-review", { updated: T2, worktree: tree });
-  assert.ok(await waitFor(() => calls.length > 0), "переход в рабочем дереве не объявлен");
+  await writeUntilNoticed(() => writeCard(tree, "039", "in-review", { updated: T2, worktree: tree }), calls, "переход в рабочем дереве не объявлен");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   assert.equal(calls[0].sessionId, "sess-reviewer");
@@ -203,8 +218,7 @@ await check("новое рабочее дерево подхватывается
   apply(ctx, config(board, { catchUpMs: 5000 }));
   await sleep(150);
   const tree = makeWorktree(board, "047");
-  writeCard(tree, "047", "in-review", { updated: T2 });
-  assert.ok(await waitFor(() => calls.length > 0), "появившееся дерево не подхвачено");
+  await writeUntilNoticed(() => writeCard(tree, "047", "in-review", { updated: T2 }), calls, "появившееся дерево не подхвачено");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   assert.equal(calls[0].sessionId, "sess-reviewer");
@@ -231,8 +245,7 @@ await check("удалённое дерево не ломает обход и н�
   assert.equal(calls.length, 0, `уборка дерева дала наряд: ${JSON.stringify(calls.map((c) => c.content[0].text))}`);
 
   // Сторож продолжает работать: переход в основном чекауте по-прежнему виден.
-  writeCard(board, "039", "in-review", { updated: T2 });
-  assert.ok(await waitFor(() => calls.length > 0), "основной чекаут перестал объявлять переходы");
+  await writeUntilNoticed(() => writeCard(board, "039", "in-review", { updated: T2 }), calls, "основной чекаут перестал объявлять переходы");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   assert.equal(calls[0].sessionId, "sess-reviewer");
@@ -254,8 +267,7 @@ await check("битые и пустые каталоги в worktrees/ не ло
   await sleep(300);
   assert.equal(calls.length, 0, `битые каталоги дали наряд: ${calls.length}`);
 
-  writeCard(board, "045", "in-review", { updated: T2 });
-  assert.ok(await waitFor(() => calls.length > 0), "основной чекаут не объявил переход");
+  await writeUntilNoticed(() => writeCard(board, "045", "in-review", { updated: T2 }), calls, "основной чекаут не объявил переход");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   ctx.pick("dispose")();
@@ -312,9 +324,7 @@ await check("переход в основном чекауте по-прежне
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, config(board, { catchUpMs: 5000 }));
-  await sleep(150);
-  writeCard(board, "048", "in-review", { updated: T2 });
-  assert.ok(await waitFor(() => calls.length > 0), "переход в основной доске не объявлен");
+  await writeUntilNoticed(() => writeCard(board, "048", "in-review", { updated: T2 }), calls, "переход в основной доске не объявлен");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   assert.equal(calls[0].sessionId, "sess-reviewer");
