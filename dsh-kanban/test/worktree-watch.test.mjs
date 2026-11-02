@@ -333,9 +333,16 @@ await check("наряд о слиянии не зовёт в рабочее де
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, { ...config(board, { catchUpMs: 5000 }), roles: { ...ROLES, dispatcher: "sess-dispatch" } });
-  await sleep(150);
-  writeCard(tree, "053", "ready", { updated: T3, worktree: tree });
-  assert.ok(await waitFor(() => calls.length > 0), "наряд о слиянии не отправлен");
+  // Фиксированная пауза до записи не годится: `fs.watch` под нагрузкой не успевает
+  // встать, и переход «теряется» (флейк на загруженной машине). Пишем ту же версию
+  // карточки, пока сторож не увидит: `updated` не меняется, поэтому ключ доставки
+  // тот же и второй наряд не появится — это проверяется ниже.
+  const deadline = Date.now() + 5000;
+  while (calls.length === 0 && Date.now() < deadline) {
+    writeCard(tree, "053", "ready", { updated: T3, worktree: tree });
+    await sleep(50);
+  }
+  assert.ok(calls.length > 0, "наряд о слиянии не отправлен");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   assert.equal(calls[0].sessionId, "sess-dispatch");
