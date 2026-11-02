@@ -12,8 +12,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
+    "lib",
+    "presets",
     "cordis.patch.yml"
   ],
   "dsh": {
