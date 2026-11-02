@@ -649,6 +649,8 @@ function makeChannelContext({ sessionCwd, gateway } = {}) {
       return async () => services.delete(name);
     },
     get: (name) => {
+      // Реестр пресетов (#062): плагин инжектит agentPresets и регистрирует роли.
+      if (name === "agentPresets") return { register: async () => async () => {} };
       if (name === "typertGateway") return gatewayRef.current;
       if (name === "sessionQuery") {
         return {

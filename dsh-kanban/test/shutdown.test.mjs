@@ -127,6 +127,8 @@ function makeCtx({ sessionCwd, prompt, logs = [] } = {}) {
       return async () => services.delete(name);
     },
     get: (name) => {
+      // Реестр пресетов (#062): без него плагин не стартует (inject).
+      if (name === "agentPresets") return { register: async () => async () => {} };
       if (name === "sessionQuery") {
         return {
           observeSession: async (sessionId) => ({

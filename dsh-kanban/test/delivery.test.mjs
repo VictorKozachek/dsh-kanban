@@ -80,7 +80,9 @@ function makeCtx(calls, failure = null, delayMs = 0) {
         calls.push(request);
         return { accepted: true };
       }
-    }
+    },
+    // Плагин инжектит реестр пресетов (#062): без него apply не стартует.
+    agentPresets: { register: async () => async () => {} }
   };
 }
 
