@@ -3,6 +3,7 @@
 # Поставить пресеты ролей в патч-слой профиля DSH.
 #
 #   bin/install-presets.sh [--profile ИМЯ] [--profiles-dir DIR] [--rows ФАЙЛ] [--dry-run]
+#   bin/install-presets.sh --takeover [--profile ИМЯ] [--profiles-dir DIR] [--dry-run]
 #
 # Почему так: в DSH 0.1.7 пресет — это строка композиции профиля
 # (`@deepseek-ai/dsh-agent-preset`), и персональные пресеты Web-редактор пишет
@@ -14,6 +15,12 @@
 # bin/gen-role-presets.sh). Блок в патч-слое помечен маркерами и перезаписывается
 # целиком, поэтому повторный запуск ничего не дублирует.
 #
+# --takeover убирает блок пресетов из патч-слоя профиля: с версии, где плагин
+# сам регистрирует определения при старте (#062, спека 005), legacy-строки не
+# нужны, а без takeover дают в логе предупреждения о дубликатах. Остальной патч
+# не трогается, повторный запуск идемпотентен, отсутствие блока — «нечего
+# убирать» с кодом 0.
+#
 # По умолчанию: профиль desktop, каталог профилей $DSH_HOME/profiles.
 #
 set -euo pipefail
@@ -23,6 +30,7 @@ PROFILE="desktop"
 ROWS="$ROOT/presets/role-presets.patch.yml"
 PROFILES_DIR="${DSH_HOME:-$HOME/.dsh}/profiles"
 DRY_RUN=0
+TAKEOVER=0
 
 usage() {
   sed -n '3,/^set -euo pipefail/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'
@@ -37,10 +45,82 @@ while [[ $# -gt 0 ]]; do
     --rows) ROWS="${2:?--rows требует значения}"; shift 2 ;;
     --rows=*) ROWS="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --takeover) TAKEOVER=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+PROFILE_DIR="$PROFILES_DIR/$PROFILE"
+if [[ ! -d "$PROFILE_DIR" ]]; then
+  echo "профиль '$PROFILE' не инициализирован: нет $PROFILE_DIR" >&2
+  echo "запустите профиль один раз (или укажите --profiles-dir)" >&2
+  exit 1
+fi
+
+PATCH="$PROFILE_DIR/cordis.patch.yml"
+
+# ── миграция: убрать legacy-блок пресетов из профиля ─────────────────────────
+if (( TAKEOVER == 1 )); then
+  command -v python3 >/dev/null 2>&1 || { echo "нужен python3" >&2; exit 1; }
+  PATCH="$PATCH" DRY_RUN="$DRY_RUN" python3 - <<'PY_TAKEOVER'
+import os
+import re
+import sys
+from pathlib import Path
+
+BEGIN = "# >>> пресеты ролей (bin/install-presets.sh) — не правьте вручную"
+END = "# <<< пресеты ролей"
+
+patch = Path(os.environ["PATCH"])
+dry = os.environ.get("DRY_RUN") == "1"
+
+if not patch.exists():
+    print(f"нечего убирать: патч-слоя {patch} нет — пресеты в профиль не ставились")
+    sys.exit(0)
+
+text = patch.read_text(encoding="utf-8")
+pattern = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", re.S)
+match = pattern.search(text)
+if match is None:
+    print(f"нечего убирать: в {patch} нет блока пресетов ролей")
+    print("подсказка: блок помечен маркерами «{0}» и «{1}»".format(BEGIN, END))
+    sys.exit(0)
+
+removed = match.group(0).count("\n")
+# Склеиваем только стык вырезанного блока: остальной патч остаётся байт в байт.
+before = text[: match.start()].rstrip("\n")
+after = text[match.end():].lstrip("\n")
+if before and after:
+    rest = before + "\n\n" + after
+elif before:
+    rest = before + "\n"
+else:
+    rest = after
+if rest and not rest.endswith("\n"):
+    rest += "\n"
+
+# Если кроме комментариев в слое ничего не осталось, документ YAML был бы пустым
+# (null вместо списка) — оставляем его валидным пустым списком.
+entries = [line for line in rest.splitlines() if line.strip() and not line.strip().startswith("#")]
+if not entries:
+    header = "\n".join(line for line in rest.splitlines() if line.strip().startswith("#"))
+    rest = (header + "\n\n" if header else "") + "[]\n"
+
+if dry:
+    print(f"удалил бы блок пресетов ролей ({removed} строк) из {patch}")
+    sys.exit(0)
+
+try:
+    patch.write_text(rest, encoding="utf-8")
+except OSError as error:
+    print(f"не удалось записать патч-слой {patch}: {error}", file=sys.stderr)
+    sys.exit(1)
+print(f"удалён блок пресетов ролей ({removed} строк) из {patch}")
+print("пресеты поставляет плагин dsh-kanban: определения регистрируются при старте, дубликатов в логе нет")
+PY_TAKEOVER
+  exit 0
+fi
 
 if [[ ! -f "$ROWS" ]]; then
   cat >&2 <<MSG
@@ -51,15 +131,6 @@ if [[ ! -f "$ROWS" ]]; then
 MSG
   exit 1
 fi
-
-PROFILE_DIR="$PROFILES_DIR/$PROFILE"
-if [[ ! -d "$PROFILE_DIR" ]]; then
-  echo "профиль '$PROFILE' не инициализирован: нет $PROFILE_DIR" >&2
-  echo "запустите профиль один раз (или укажите --profiles-dir)" >&2
-  exit 1
-fi
-
-PATCH="$PROFILE_DIR/cordis.patch.yml"
 
 if (( DRY_RUN == 1 )); then
   echo "профиль: $PROFILE"
