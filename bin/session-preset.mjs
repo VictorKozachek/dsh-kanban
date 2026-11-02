@@ -345,20 +345,43 @@ export function roleOfPreset(agentPreset) {
 }
 
 /**
- * Известные пресеты: `presets/role-presets.json` (артефакт плагина, #062), а
- * если его ещё нет — встроенный список `standard` + четыре роли.
+ * Известные пресеты.
+ *
+ * Источник правды — артефакт плагина `dsh-kanban/presets/role-presets.json`
+ * (его генерирует `bin/gen-role-presets.sh`, #062): определения ролей едут
+ * вместе с плагином. Корневой `presets/role-presets.json` остаётся запасным
+ * путём (старые раскладки/ручные копии). `standard` — встроенный пресет DSH —
+ * известен всегда, как и четыре роли плагина: их регистрирует сам плагин
+ * (самолечение, спека 005), поэтому переключение на роль не должно требовать
+ * `--allow-unknown`, даже если артефакт отстал.
+ *
+ * @returns `{ ids, source }`: `ids` — известные id в стабильном порядке (встроенные
+ *   сначала), `source` — откуда взяты дополнительные id.
  */
 export function knownPresets(repoRoot) {
-  const file = path.join(repoRoot, "presets", "role-presets.json");
-  try {
-    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  const candidates = [
+    path.join(repoRoot, "dsh-kanban", "presets", "role-presets.json"),
+    path.join(repoRoot, "presets", "role-presets.json"),
+  ];
+  const ids = new Set(FALLBACK_PRESETS);
+  let source = null;
+  for (const file of candidates) {
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      continue; // файла нет или он битый — пробуем следующий путь
+    }
     const list = Array.isArray(data) ? data : Array.isArray(data?.presets) ? data.presets : [];
-    const ids = list.map((entry) => (typeof entry === "string" ? entry : entry?.id)).filter((id) => typeof id === "string" && id !== "");
-    if (ids.length > 0) return { ids: [...new Set(ids)], source: file };
-  } catch {
-    /* файла нет или он битый — работаем по встроенному списку */
+    const found = list
+      .map((entry) => (typeof entry === "string" ? entry : entry?.id))
+      .filter((id) => typeof id === "string" && id !== "");
+    if (found.length === 0) continue;
+    for (const id of found) ids.add(id);
+    source = file;
+    break;
   }
-  return { ids: [...FALLBACK_PRESETS], source: "встроенный список (presets/role-presets.json не найден)" };
+  return { ids: [...ids], source: source ?? "встроенный список (артефакт dsh-kanban/presets/role-presets.json не найден)" };
 }
 
 /** Ближайший родитель каталога, у которого есть `.kanban/` — доска сессии. */
@@ -697,6 +720,11 @@ export function applyPlan(plan, options) {
   } catch (error) {
     return { ok: false, error: `бэкап не создан: ${error?.message ?? error}` };
   }
+  // Окно между планом и записью: пользователь мог запустить DSH. Перепроверяем
+  // лок прямо перед досыпанием — запись в открытый лог недопустима.
+  const lock = sessionLockHeld(path.join(session.dir, "session.lock"), options.python ?? "python3");
+  if (lock.held) return { ok: false, error: "DSH запустился между проверкой и записью (сессионный flock занят): ничего не изменено", backup };
+  if (lock.unknown) return { ok: false, error: "не удалось перепроверить блокировку перед записью: ничего не изменено", backup };
   const before = fs.readFileSync(session.file);
   const event = { type: PRESET_EVENT, seq: plan.seq, time: Date.now(), data: { agentPreset: plan.to } };
   let appended = 0;

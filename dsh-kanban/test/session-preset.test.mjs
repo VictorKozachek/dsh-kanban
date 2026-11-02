@@ -32,6 +32,7 @@ import {
   LOG_VERSION,
   ROLES,
   appendEventFrame,
+  applyPlan,
   boardForCwd,
   decodeLog,
   discoverSessions,
@@ -42,6 +43,7 @@ import {
   main,
   openTurnOf,
   parseArgs,
+  planSessionChange,
   presetOf,
   readLog,
   readRoleMap,
@@ -226,12 +228,25 @@ check("роль по пресету: четыре роли и префикс pre
   assert.equal(roleOfPreset("standard"), null);
 });
 
-check("знакомые пресеты: JSON из репозитория или встроенный список", () => {
+check("знакомые пресеты: standard и роли всегда, плюс id из артефакта пакета", () => {
   const fallback = knownPresets(path.join(work, "no-presets"));
   assert.deepEqual(fallback.ids, ["standard", ...ROLES]);
-  fs.writeFileSync(path.join(repoRoot, "presets", "role-presets.json"), JSON.stringify([{ id: "standard" }, { id: "worker" }, { id: "auditor" }]));
-  const fromFile = knownPresets(repoRoot);
-  assert.deepEqual(fromFile.ids, ["standard", "worker", "auditor"]);
+  assert.match(fallback.source, /встроенный список/);
+  // Артефакт плагина лежит внутри пакета (#062), а не в корне репозитория.
+  const artifact = path.join(repoRoot, "dsh-kanban", "presets", "role-presets.json");
+  fs.mkdirSync(path.dirname(artifact), { recursive: true });
+  fs.writeFileSync(artifact, JSON.stringify([{ id: "worker" }, { id: "ptc" }]));
+  const fromPackage = knownPresets(repoRoot);
+  assert.equal(fromPackage.source, artifact);
+  assert.deepEqual(fromPackage.ids, ["standard", ...ROLES, "ptc"]);
+  assert.ok(fromPackage.ids.includes("standard"), "standard должен быть известен всегда");
+  assert.ok(fromPackage.ids.includes("worker"), "роли плагина известны всегда");
+  fs.rmSync(artifact);
+  // Запасной путь — корневой presets/role-presets.json (старые раскладки).
+  fs.writeFileSync(path.join(repoRoot, "presets", "role-presets.json"), JSON.stringify([{ id: "auditor" }]));
+  const fromRoot = knownPresets(repoRoot);
+  assert.equal(fromRoot.source, path.join(repoRoot, "presets", "role-presets.json"));
+  assert.deepEqual(fromRoot.ids, ["standard", ...ROLES, "auditor"]);
   fs.rmSync(path.join(repoRoot, "presets", "role-presets.json"));
 });
 
@@ -373,6 +388,54 @@ await checkAsync("живой flock на session.lock — отказ, файл н
     const result = await run(["--session", "lock01", "--to", "worker", "--yes"]);
     assert.equal(result.code, 1, "смена прошла при живом DSH");
     assert.match(result.err, /DSH держит сессию/);
+    assert.ok(bytes(session.file).equals(before), "файл изменён при живом DSH");
+  } finally {
+    holder.kill("SIGKILL");
+  }
+});
+
+await checkAsync("с артефактом пакета: --to ptc/standard проходят, чужой id — только с --allow-unknown", async () => {
+  writeSession({ id: "session-art001", preset: "standard" });
+  const artifact = path.join(repoRoot, "dsh-kanban", "presets", "role-presets.json");
+  fs.mkdirSync(path.dirname(artifact), { recursive: true });
+  fs.writeFileSync(artifact, JSON.stringify([{ id: "dispatcher" }, { id: "ptc" }]));
+  try {
+    const known = await run(["--session", "art001", "--to", "ptc", "--dry-run", "--yes"]);
+    assert.equal(known.code, 0, known.err);
+    const builtin = await run(["--session", "art001", "--to", "standard", "--dry-run", "--yes"]);
+    assert.equal(builtin.code, 0, builtin.err);
+    const roles = await run(["--session", "art001", "--to", "verifier", "--dry-run", "--yes"]);
+    assert.equal(roles.code, 0, roles.err);
+    const ghost = await run(["--session", "art001", "--to", "ghost", "--dry-run", "--yes"]);
+    assert.equal(ghost.code, 1);
+    assert.match(ghost.err, /неизвестен/);
+  } finally {
+    fs.rmSync(artifact);
+  }
+});
+
+await checkAsync("лок заняли после расчёта плана — applyPlan отказывается писать", async () => {
+  const session = writeSession({ id: "session-race001", preset: "standard" });
+  const lockPath = path.join(session.dir, "session.lock");
+  const plan = planSessionChange(session, { to: "worker", home, python: "python3", lock: "free", noRoles: true, backup: true, force: false });
+  assert.deepEqual(plan.problems, []);
+  const holder = spawn("python3", [
+    "-c",
+    "import fcntl,sys,time\nhandle=open(sys.argv[1],'r+')\nfcntl.flock(handle, fcntl.LOCK_EX|fcntl.LOCK_NB)\nprint('ok', flush=True)\ntime.sleep(10)",
+    lockPath,
+  ]);
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("держатель лока не стартовал")), 3000);
+      holder.stdout.once("data", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    const before = bytes(session.file);
+    const applied = applyPlan(plan, { home, noRoles: true, backup: true, python: "python3" });
+    assert.equal(applied.ok, false, "запись прошла при живом DSH");
+    assert.match(applied.error, /DSH запустился/);
     assert.ok(bytes(session.file).equals(before), "файл изменён при живом DSH");
   } finally {
     holder.kill("SIGKILL");
