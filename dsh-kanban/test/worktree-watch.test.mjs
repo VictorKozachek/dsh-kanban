@@ -251,11 +251,15 @@ await check("битые и пустые каталоги в worktrees/ не ло
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, config(board, { catchUpMs: 20 }));
-  await sleep(300);
+  // Стартовый обход — это таймер catchUpMs + один проход по доске; внешнего
+  // маркера у него нет (state пишется только когда есть наряды). Поэтому пауза,
+  // но с запасом: под нагрузкой 300 мс не хватало, проход стартовал уже после
+  // нашей записи, и сторож видел только in-review — перехода «не было».
+  await sleep(1500);
   assert.equal(calls.length, 0, `битые каталоги дали наряд: ${calls.length}`);
 
   writeCard(board, "045", "in-review", { updated: T2 });
-  assert.ok(await waitFor(() => calls.length > 0), "основной чекаут не объявил переход");
+  assert.ok(await waitFor(() => calls.length > 0, 8000), "основной чекаут не объявил переход");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   ctx.pick("dispose")();

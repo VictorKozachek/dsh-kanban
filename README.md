@@ -112,13 +112,13 @@ bin/session-preset.sh --session <id|prefix> --to worker --yes
 | `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (формат карточки); карточки и спеки в публичный снапшот не входят |
 | `agent-presets/`, `presets/` | заготовки пресетов ролей и сгенерированные строки для профиля |
 | `.agents/skills/` | скилы DSH `kanban` и `commit` |
-| `test/`, `dsh-kanban/test/` | регрессии: 13 файлов, 457 проверок |
+| `test/`, `dsh-kanban/test/` | регрессии: 13 файлов, 459 проверок |
 | `KANBAN.md`, `FEATURES*.md`, `AGENTS.md` | руководство, фичалист (ru/en), протокол агентов |
 
 ## Проверки · Tests
 
 ```bash
-bin/test.sh                                   # весь набор: 457 проверок, должен быть зелёным
+bin/test.sh                                   # весь набор: 459 проверок, должен быть зелёным
 bin/node.sh bin/host-shutdown-check.mjs       # реальный graceful shutdown Host'а (4 сценария)
 ```
 

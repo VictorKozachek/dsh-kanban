@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { apply } from "../lib/index.js";
-import { parseMinTodo } from "../lib/backlog-notices.js";
+import { REFILL_KEY, parseMinTodo } from "../lib/backlog-notices.js";
 
 let passed = 0;
 let failed = 0;
@@ -268,7 +268,13 @@ await check("после пополнения и нового недобора �
 
   // Пополнение: карточка появилась в todo без владельца — асайна нет, недобор снят.
   writeCard(board, "110", "todo");
-  await sleep(300);
+  // Синхронизация — по факту, а не по паузе: под нагрузкой обход доски с
+  // debounce может не уложиться в фиксированные 300 мс, и тогда «новый недобор»
+  // не объявляется, потому что сторож не увидел промежуточное пополнение.
+  assert.ok(
+    await waitFor(() => !stateKeys(board).includes(REFILL_KEY), 8000),
+    "сигнал недобора не снят после пополнения — стенд не проверяет повтор",
+  );
   assert.equal(calls.length, 1, "пополнение не должно давать наряд");
 
   // Исполнитель взял карточку — todo снова пуст, это новый недобор.

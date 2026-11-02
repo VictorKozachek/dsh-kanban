@@ -135,9 +135,18 @@ await check("переход по файлу объявляется один ра
   const board = makeBoard([["005", "in-progress", { owner: "sess-worker" }]]);
   const calls = [];
   apply(makeCtx(calls), { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 5000, debounceMs: 20 });
-  await sleep(150);
-  writeCard(board, "005", "in-review", { owner: "sess-worker", updated: "2026-10-14T16:00:00Z" });
-  assert.ok(await waitFor(() => calls.length > 0), "переход не объявлен");
+  // Событие fs.watch на загруженной машине может прийти позже, чем запись, или
+  // потеряться при регистрации наблюдателя. Повторяем ту же запись (тот же
+  // `updated`), пока наряд не придёт: дебаунс склеивает повторы в один проход,
+  // поэтому «ровно один наряд» ниже остаётся настоящей проверкой.
+  const deadline = Date.now() + 8000;
+  let attempts = 0;
+  while (calls.length === 0 && Date.now() < deadline) {
+    writeCard(board, "005", "in-review", { owner: "sess-worker", updated: "2026-10-14T16:00:00Z" });
+    attempts += 1;
+    await sleep(250);
+  }
+  assert.ok(calls.length > 0, `переход не объявлен (попыток записи: ${attempts})`);
   await sleep(200);
   assert.equal(calls.length, 1, "наряд должен уйти ровно один раз");
   assert.equal(calls[0].sessionId, "sess-reviewer");
