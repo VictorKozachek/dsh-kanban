@@ -1717,6 +1717,177 @@ else
   fail "запись: код $children_code, $(head -1 "$WORK/children10")"
 fi
 
+echo "== session-preset: офлайн-смена пресета сессии (DSH закрыт)"
+sp="$WORK/session-preset"
+sp_home="$sp/dsh"
+sp_board="$sp/board"
+mkdir -p "$sp_board/.kanban"
+cat > "$sp/mk-log.mjs" <<'MKLOG'
+import fs from "node:fs";
+import path from "node:path";
+import zlib from "node:zlib";
+const [home, id, cwd, preset, openTurn] = process.argv.slice(2);
+const frame = (value) =>
+  zlib.zstdCompressSync(Buffer.from(`${JSON.stringify(value)}\n`, "utf8"), {
+    params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 },
+  });
+const events = [{ type: "turn/start", seq: 0, time: 1, data: { turn: 1 } }];
+let seq = 1;
+if (preset !== "standard") {
+  events.push({ type: "agent-preset/selected", seq, time: 2, data: { agentPreset: preset } });
+  seq += 1;
+}
+events.push({ type: "turn/end", seq, time: 3, data: { turn: 1, reason: "done" } });
+seq += 1;
+if (openTurn === "open") events.push({ type: "turn/start", seq, time: 4, data: { turn: 2 } });
+const dir = path.join(home, "sessions", `--${cwd.replaceAll("/", "-")}--`, id);
+fs.mkdirSync(dir, { recursive: true });
+const header = { type: "session", version: 4, id, createdAt: 1, cwd, agentPreset: "standard" };
+fs.writeFileSync(path.join(dir, "session.v4.jsonl.zstd"), Buffer.concat([frame(header), ...events.map(frame)]));
+fs.writeFileSync(path.join(dir, "session.lock"), "");
+console.log(dir);
+MKLOG
+sp_log="$("$ROOT/bin/node.sh" "$sp/mk-log.mjs" "$sp_home" "session-beef0001" "$sp_board" "standard" "closed")"
+sp_session="$sp_log/session.v4.jsonl.zstd"
+sp() { DSH_HOME="$sp_home" "$ROOT/bin/session-preset.sh" "$@"; }
+
+sp_code=0
+sp --help >"$WORK/sp0" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]] && grep -q -- "--to <preset>" "$WORK/sp0"; then
+  pass "session-preset --help: код 0 и справка"
+else
+  fail "session-preset --help: код $sp_code, $(head -1 "$WORK/sp0")"
+fi
+sp_code=0
+sp >"$WORK/sp1" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "2" ]] && grep -q "не указана цель" "$WORK/sp1"; then
+  pass "session-preset без цели: код 2 и подсказка"
+else
+  fail "session-preset без цели: код $sp_code, $(head -1 "$WORK/sp1")"
+fi
+sp_code=0
+sp --session beef0001 --to worker --frobnicate >"$WORK/sp2" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "2" ]] && grep -q "неизвестный аргумент" "$WORK/sp2"; then
+  pass "session-preset с неизвестным флагом: код 2"
+else
+  fail "session-preset неизвестный флаг: код $sp_code, $(head -1 "$WORK/sp2")"
+fi
+
+sp_code=0
+sp --list >"$WORK/sp3" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]] && grep -q "session-beef0001" "$WORK/sp3" && grep -q "пресет: standard" "$WORK/sp3"; then
+  pass "session-preset --list показывает сессию, cwd и пресет"
+else
+  fail "session-preset --list: код $sp_code, $(head -3 "$WORK/sp3" | tr '\n' ' ')"
+fi
+
+sp_before="$(cksum "$sp_session")"
+sp_code=0
+sp --session beef0001 --to worker --dry-run --yes >"$WORK/sp4" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]] && [[ "$(cksum "$sp_session")" == "$sp_before" ]] && grep -q "dry-run" "$WORK/sp4"; then
+  pass "session-preset --dry-run: план без изменений файла"
+else
+  fail "session-preset --dry-run: код $sp_code, $(head -2 "$WORK/sp4" | tr '\n' ' ')"
+fi
+
+sp_code=0
+sp --session beef0001 --to ghost --yes >"$WORK/sp5" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "1" ]] && grep -q "неизвестен" "$WORK/sp5"; then
+  pass "session-preset: неизвестный пресет — код 1"
+else
+  fail "session-preset неизвестный пресет: код $sp_code, $(head -1 "$WORK/sp5")"
+fi
+
+sp_code=0
+sp --session beef0001 --to worker --yes >"$WORK/sp6" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]] && grep -q "перезапустите DSH" "$WORK/sp6"; then
+  pass "session-preset меняет пресет и напоминает про перезапуск"
+else
+  fail "session-preset смена: код $sp_code, $(head -2 "$WORK/sp6" | tr '\n' ' ')"
+fi
+if sp --list >"$WORK/sp7" 2>&1 && grep -q "standard→worker" "$WORK/sp7"; then
+  pass "session-preset: проекция пресета после смены — worker"
+else
+  fail "session-preset: проекция после смены: $(grep -A2 beef0001 "$WORK/sp7" | tr '\n' ' ')"
+fi
+if ls "$sp_home/session-backups" 2>/dev/null | grep -q "session-beef0001\..*\.zst"; then
+  pass "session-preset: бэкап лога создан"
+else
+  fail "session-preset: бэкап не создан"
+fi
+if grep -q '"worker"' "$sp_board/.kanban/.watcher-roles.json" 2>/dev/null; then
+  pass "session-preset: карта ролей доски обновлена"
+else
+  fail "session-preset: карта ролей не обновлена: $(cat "$sp_board/.kanban/.watcher-roles.json" 2>/dev/null)"
+fi
+
+# DSH «запущен»: держим тот же flock, что и DSH, на session.lock (python3).
+python3 - "$sp_log/session.lock" <<'SPLOCK' >"$WORK/sp8" 2>&1 &
+import fcntl, sys, time
+handle = open(sys.argv[1], "r+")
+fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+print("ok", flush=True)
+time.sleep(8)
+SPLOCK
+sp_holder=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  grep -q ok "$WORK/sp8" 2>/dev/null && break
+  sleep 0.2
+done
+sp_code=0
+sp --session beef0001 --to reviewer --yes >"$WORK/sp9" 2>&1 || sp_code=$?
+kill "$sp_holder" 2>/dev/null
+wait "$sp_holder" 2>/dev/null
+if [[ "$sp_code" == "1" ]] && grep -q "DSH держит сессию" "$WORK/sp9"; then
+  pass "session-preset: живой DSH (flock) — отказ, код 1"
+else
+  fail "session-preset при живом DSH: код $sp_code, $(head -2 "$WORK/sp9" | tr '\n' ' ')"
+fi
+
+sp_backup="$(ls "$sp_home/session-backups"/session-beef0001.*.zst | grep -v pre-restore | head -1)"
+sp_code=0
+sp --restore "$sp_backup" >"$WORK/sp10" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]] && sp --list 2>/dev/null | grep -q "пресет: standard  seq: 1"; then
+  pass "session-preset --restore возвращает лог из бэкапа"
+else
+  fail "session-preset --restore: код $sp_code, $(head -2 "$WORK/sp10" | tr '\n' ' ')"
+fi
+sp_code=0
+sp --restore "$sp/no-such.zst" >"$WORK/sp11" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "1" ]] && grep -q "не найден" "$WORK/sp11"; then
+  pass "session-preset --restore несуществующего файла: код 1"
+else
+  fail "session-preset --restore нет файла: код $sp_code, $(head -1 "$WORK/sp11")"
+fi
+
+# Открытый ход без --force — отказ (файл не меняется), с --force — проходит.
+"$ROOT/bin/node.sh" "$sp/mk-log.mjs" "$sp_home" "session-cafe0002" "$sp_board" "standard" "open" >/dev/null
+sp_open="$sp_home/sessions/--$(printf '%s' "$sp_board" | tr '/' '-')--/session-cafe0002/session.v4.jsonl.zstd"
+sp_before="$(cksum "$sp_open")"
+sp_code=0
+sp --session cafe0002 --to worker --yes >"$WORK/sp12" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "1" ]] && grep -q "открытый ход" "$WORK/sp12" && [[ "$(cksum "$sp_open")" == "$sp_before" ]]; then
+  pass "session-preset: открытый ход без --force — отказ, файл цел"
+else
+  fail "session-preset открытый ход: код $sp_code, $(head -2 "$WORK/sp12" | tr '\n' ' ')"
+fi
+sp_code=0
+sp --session cafe0002 --to worker --force --no-roles --yes >"$WORK/sp13" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]]; then
+  pass "session-preset: --force разрешает смену при открытом ходе"
+else
+  fail "session-preset --force: код $sp_code, $(head -2 "$WORK/sp13" | tr '\n' ' ')"
+fi
+
+# --cwd и --from: фильтр по каталогу сессии.
+sp_code=0
+sp --cwd "$sp_board" --from worker --to reviewer --force --dry-run --yes >"$WORK/sp14" 2>&1 || sp_code=$?
+if [[ "$sp_code" == "0" ]] && grep -q "session-cafe0002" "$WORK/sp14"; then
+  pass "session-preset --cwd/--from фильтруют сессии по каталогу и пресету"
+else
+  fail "session-preset --cwd/--from: код $sp_code, $(head -3 "$WORK/sp14" | tr '\n' ' ')"
+fi
+
 echo "== таблица файлов не отстаёт от набора"
 # Проверяем те же строки таблицы, что и выше: файл набора, которого в ней нет, —
 # такая же ошибка, как путь, которого нет на диске (#033). Внутренние проверки

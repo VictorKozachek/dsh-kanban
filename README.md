@@ -31,6 +31,9 @@ sessions, so several roles can work against one board.
 - **Дочерние доски:** read-only обзор дерева досок команд (манифест
   `.kanban/children.json`, генератор `bin/board-children.sh`) — родитель видит
   прогресс дерева, но не управляет.
+- **Восстановление пресета:** `bin/session-preset.sh` — офлайн-смена пресета
+  существующей сессии (при закрытом DSH, с бэкапом и обновлением карты ролей;
+  нужен перезапуск) — на случай, когда роль «слетела».
 - **Совместимость:** DSH 0.2.1-rc.3, macOS bash 3.2, graceful shutdown Host'а;
   не зависит от внешних проектов-источников.
 
@@ -84,28 +87,48 @@ bin/task-move.sh 007 todo --owner "<session-id>"
 Подробный сценарий ролей, бэклог, асайн из GUI и лимиты — в
 [KANBAN.md](KANBAN.md) и [AGENTS.md](AGENTS.md) (протокол агентов).
 
+## Восстановление пресета · Preset recovery
+
+Сменить пресет уже стартовавшей сессии DSH нельзя: реестр пресетов отвечает
+`agent-preset/locked`, в интерфейсе выбор есть только при создании сессии. Если
+роль «слетела», при **закрытом** DSH:
+
+```bash
+bin/session-preset.sh --list                          # сессии, cwd, текущий пресет
+bin/session-preset.sh --session <id|prefix> --to worker --yes
+# затем перезапустите DSH
+```
+
+Инструмент досыпает в лог сессии (`session.v4.jsonl.zstd`) один zstd-кадр с
+событием `agent-preset/selected`, делает бэкап лога в
+`~/.dsh/session-backups/` и обновляет карту ролей доски
+(`.kanban/.watcher-roles.json`). Живой DSH он не трогает: если процесс держит
+`flock` на `session.lock`, будет отказ. Для восстановления после потери
+**определений** пресетов (issue #1) достаточно обновить плагин — определения
+едут вместе с ним; подробности и ограничения — в [KANBAN.md](KANBAN.md).
+
 ## Структура репозитория · Layout
 
 | Путь | Что это |
 |---|---|
 | `dsh-kanban/` | плагин: `lib/client.js` (GUI), `lib/index.js` (host-сторож), `lib/watcher-core.js`, `lib/backlog-notices.js`, `lib/card-actions.js`, `lib/children.js`, `lib/presets.js` |
-| `bin/` | 19 скриптов протокола и установки (`task-*`, `board-*`, `spec-new`, `install-*`, `test.sh`, `host-shutdown-check.mjs`) |
+| `bin/` | 21 скрипт протокола и установки (`task-*`, `board-*`, `spec-new`, `session-preset.*`, `install-*`, `test.sh`, `host-shutdown-check.mjs`) |
 | `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (формат карточки); карточки и спеки в публичный снапшот не входят |
 | `agent-presets/`, `presets/` | заготовки пресетов ролей и сгенерированные строки для профиля |
 | `.agents/skills/` | скилы DSH `kanban` и `commit` |
-| `test/`, `dsh-kanban/test/` | регрессии: 13 файлов, 430 проверок |
+| `test/`, `dsh-kanban/test/` | регрессии: 14 файлов, 479 проверок |
 | `KANBAN.md`, `FEATURES*.md`, `AGENTS.md` | руководство, фичалист (ru/en), протокол агентов |
 
 ## Проверки · Tests
 
 ```bash
-bin/test.sh                                   # весь набор: 430 проверок, должен быть зелёным
+bin/test.sh                                   # весь набор: 479 проверок, должен быть зелёным
 bin/node.sh bin/host-shutdown-check.mjs       # реальный graceful shutdown Host'а (4 сценария)
 ```
 
 `bin/test.sh` не требует сети и работает из чистого клона: логика доски, рендер
 без браузера, слияние worktree-копий, наряды, канал асайна, дочерние доски,
-самолечение пресетов, dispose/shutdown, скрипты и локали.
+самолечение пресетов, офлайн-смена пресета сессии, dispose/shutdown, скрипты и локали.
 
 ## Заметки · Notes
 
