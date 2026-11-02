@@ -88,12 +88,12 @@ bin/task-move.sh 007 todo --owner "<session-id>"
 
 | Путь | Что это |
 |---|---|
-| `dsh-kanban/` | плагин: `lib/client.js` (GUI), `lib/index.js` (host-сторож), `lib/watcher-core.js`, `lib/backlog-notices.js`, `lib/card-actions.js`, `lib/children.js` |
+| `dsh-kanban/` | плагин: `lib/client.js` (GUI), `lib/index.js` (host-сторож), `lib/watcher-core.js`, `lib/backlog-notices.js`, `lib/card-actions.js`, `lib/children.js`, `lib/presets.js` |
 | `bin/` | 19 скриптов протокола и установки (`task-*`, `board-*`, `spec-new`, `install-*`, `test.sh`, `host-shutdown-check.mjs`) |
 | `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (формат карточки); карточки и спеки в публичный снапшот не входят |
 | `agent-presets/`, `presets/` | заготовки пресетов ролей и сгенерированные строки для профиля |
 | `.agents/skills/` | скилы DSH `kanban` и `commit` |
-| `test/`, `dsh-kanban/test/` | регрессии: 12 файлов, 430 проверок |
+| `test/`, `dsh-kanban/test/` | регрессии: 13 файлов, 430 проверок |
 | `KANBAN.md`, `FEATURES*.md`, `AGENTS.md` | руководство, фичалист (ru/en), протокол агентов |
 
 ## Проверки · Tests
@@ -105,7 +105,7 @@ bin/node.sh bin/host-shutdown-check.mjs       # реальный graceful shutdo
 
 `bin/test.sh` не требует сети и работает из чистого клона: логика доски, рендер
 без браузера, слияние worktree-копий, наряды, канал асайна, дочерние доски,
-dispose/shutdown, скрипты и локали.
+самолечение пресетов, dispose/shutdown, скрипты и локали.
 
 ## Заметки · Notes
 
@@ -115,7 +115,11 @@ dispose/shutdown, скрипты и локали.
   воспроизводим с нуля.
 - Пуш в remote — операция человека, скрипты набора не пушат.
 - DSH-обновления иногда требуют перегенерировать пресеты ролей:
-  `bin/gen-role-presets.sh && bin/install-presets.sh` (см. KANBAN.md).
+  `bin/gen-role-presets.sh` (собирает `presets/role-presets.patch.yml` и
+  `dsh-kanban/presets/role-presets.json`). Ставить пресеты в профиль не нужно —
+  плагин регистрирует их сам; если строки когда-то ставили руками, их снимает
+  `bin/install-presets.sh --takeover` (см. KANBAN.md, «Обновление плагина и
+  пресеты»).
 
 ## Обновление · Update
 

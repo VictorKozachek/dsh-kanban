@@ -139,7 +139,7 @@ against one board without chatting with each other.
 
 ## 6. Tests, mockups, documentation
 
-- **12 test files** plus `bin/test-scripts.sh`: **430 checks** in `bin/test.sh` —
+- **13 test files** plus `bin/test-scripts.sh`: **430 checks** in `bin/test.sh` —
   browserless rendering, card parser, worktree copy merging, notices, worktree
   observation, the command channel, dispose/shutdown, child boards overview
   (service and tab), scripts, locales. There is also a separate slow harness for
