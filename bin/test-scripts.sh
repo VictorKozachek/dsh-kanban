@@ -1998,6 +1998,84 @@ else
 fi
 chmod 644 "$preset_home/profiles/readonly/cordis.patch.yml"
 
+echo "== пресеты ролей: --takeover убирает legacy-блок из профиля"
+
+# Миграция (#063): с версии, где определения регистрирует сам плагин, строки в
+# профиле не нужны и дают в логе предупреждения о дубликатах. Takeover снимает
+# блок между маркерами и не должен трогать остальной патч.
+takeover_home="$WORK/takeover-home"
+takeover_patch="$takeover_home/profiles/demo/cordis.patch.yml"
+mkdir -p "$takeover_home/profiles/demo"
+printf '# мой патч профиля\n- id: ui-settings\n  config:\n    enabled: true\n' > "$takeover_patch"
+cp "$takeover_patch" "$WORK/takeover-before.yml"
+"$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+  --profiles-dir "$takeover_home/profiles" --profile demo >/dev/null 2>&1
+if grep -q "id: preset-worker" "$takeover_patch"; then
+  pass "подготовка: блок пресетов установлен"
+else
+  fail "подготовка takeover: блок пресетов не установился"
+fi
+if "$ROOT/bin/install-presets.sh" --takeover \
+     --profiles-dir "$takeover_home/profiles" --profile demo >"$WORK/out70" 2>&1; then
+  if cmp -s "$takeover_patch" "$WORK/takeover-before.yml"; then
+    pass "takeover удалил блок и сохранил остальной патч байт в байт"
+  else
+    fail "takeover испортил остальной патч: $(diff "$WORK/takeover-before.yml" "$takeover_patch" | head -5 | tr '\n' ' ')"
+  fi
+  if grep -q "удалён блок пресетов ролей" "$WORK/out70"; then
+    pass "takeover говорит, что именно сделал"
+  else
+    fail "сообщение takeover: $(cat "$WORK/out70")"
+  fi
+else
+  fail "takeover упал: $(cat "$WORK/out70")"
+fi
+code=0
+"$ROOT/bin/install-presets.sh" --takeover \
+  --profiles-dir "$takeover_home/profiles" --profile demo >"$WORK/out71" 2>&1 || code=$?
+if [[ "$code" == "0" ]] && grep -q "нечего убирать" "$WORK/out71"; then
+  pass "повторный takeover идемпотентен и говорит «нечего убирать» (код 0)"
+else
+  fail "повторный takeover: код $code, $(cat "$WORK/out71")"
+fi
+if grep -q "id: preset-" "$takeover_patch"; then
+  fail "после повторного takeover в патче остались строки пресетов"
+else
+  pass "после takeover в патче нет строк пресетов"
+fi
+# Профиль, где патч состоял только из блока: после takeover должен остаться
+# валидный пустой список, а не пустой документ.
+only_home="$WORK/takeover-only"
+mkdir -p "$only_home/profiles/demo"
+: > "$only_home/profiles/demo/cordis.patch.yml"
+"$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+  --profiles-dir "$only_home/profiles" --profile demo >/dev/null 2>&1
+"$ROOT/bin/install-presets.sh" --takeover \
+  --profiles-dir "$only_home/profiles" --profile demo >/dev/null 2>&1
+if [[ "$(cat "$only_home/profiles/demo/cordis.patch.yml")" == "[]" ]]; then
+  pass "profile из одного блока → после takeover остаётся валидный «[]»"
+else
+  fail "после takeover пустого патча: $(cat "$only_home/profiles/demo/cordis.patch.yml" | tr '\n' ' ')"
+fi
+# --dry-run ничего не меняет.
+"$ROOT/bin/install-presets.sh" --rows "$WORK/role-presets.patch.yml" \
+  --profiles-dir "$takeover_home/profiles" --profile demo >/dev/null 2>&1
+cp "$takeover_patch" "$WORK/takeover-dry.yml"
+if "$ROOT/bin/install-presets.sh" --takeover --dry-run \
+     --profiles-dir "$takeover_home/profiles" --profile demo >"$WORK/out72" 2>&1 &&
+   cmp -s "$takeover_patch" "$WORK/takeover-dry.yml" &&
+   grep -q "удалил бы" "$WORK/out72"; then
+  pass "--takeover --dry-run показывает план и не трогает патч"
+else
+  fail "--takeover --dry-run: $(cat "$WORK/out72")"
+fi
+if "$ROOT/bin/install-presets.sh" --takeover \
+     --profiles-dir "$takeover_home/profiles" --profile ghost >"$WORK/out73" 2>&1; then
+  fail "takeover в несуществующем профиле должен отказывать"
+else
+  pass "takeover в несуществующем профиле даёт понятный отказ"
+fi
+
 echo "== node без PATH: резолвер bin/node.sh"
 if node_path="$(PATH=/usr/bin:/bin "$ROOT/bin/node.sh" --which 2>/dev/null)" && [[ -x "$node_path" ]]; then
   pass "node найден вне PATH: $node_path"

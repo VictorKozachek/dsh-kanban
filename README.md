@@ -54,11 +54,15 @@ cd dsh-kanban
 bin/install-kanban.sh            # профиль web
 bin/install-kanban.sh desktop    # Electron-приложение
 
-# 2. пресеты ролей (dispatcher / worker / reviewer / verifier)
-bin/install-presets.sh
-
-# 3. перезапустить DSH (профиль читает бандлы при старте)
+# 2. перезапустить DSH (профиль читает бандлы при старте)
 ```
+
+Пресеты ролей (`dispatcher` / `worker` / `reviewer` / `verifier`) отдельной
+командой ставить не нужно: определения едут вместе с плагином и регистрируются
+при каждом старте, поэтому обновление или сброс профиля их не теряет, а
+существующие сессии не требуют пересоздания. Если пресеты когда-то ставили в
+профиль вручную (`bin/install-presets.sh`), старый блок убирается командой
+`bin/install-presets.sh --takeover`.
 
 После рестарта: правый сайдбар → «+» → «Канбан».
 
@@ -107,24 +111,24 @@ bin/session-preset.sh --session <id|prefix> --to worker --yes
 
 | Путь | Что это |
 |---|---|
-| `dsh-kanban/` | плагин: `lib/client.js` (GUI), `lib/index.js` (host-сторож), `lib/watcher-core.js`, `lib/backlog-notices.js`, `lib/card-actions.js`, `lib/children.js` |
+| `dsh-kanban/` | плагин: `lib/client.js` (GUI), `lib/index.js` (host-сторож), `lib/watcher-core.js`, `lib/backlog-notices.js`, `lib/card-actions.js`, `lib/children.js`, `lib/presets.js` |
 | `bin/` | 21 скрипт протокола и установки (`task-*`, `board-*`, `spec-new`, `session-preset.*`, `install-*`, `test.sh`, `host-shutdown-check.mjs`) |
 | `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (формат карточки); карточки и спеки в публичный снапшот не входят |
 | `agent-presets/`, `presets/` | заготовки пресетов ролей и сгенерированные строки для профиля |
 | `.agents/skills/` | скилы DSH `kanban` и `commit` |
-| `test/`, `dsh-kanban/test/` | регрессии: 13 файлов, 471 проверка |
+| `test/`, `dsh-kanban/test/` | регрессии: 14 файлов, 479 проверок |
 | `KANBAN.md`, `FEATURES*.md`, `AGENTS.md` | руководство, фичалист (ru/en), протокол агентов |
 
 ## Проверки · Tests
 
 ```bash
-bin/test.sh                                   # весь набор: 471 проверка, должен быть зелёным
+bin/test.sh                                   # весь набор: 479 проверок, должен быть зелёным
 bin/node.sh bin/host-shutdown-check.mjs       # реальный graceful shutdown Host'а (4 сценария)
 ```
 
 `bin/test.sh` не требует сети и работает из чистого клона: логика доски, рендер
 без браузера, слияние worktree-копий, наряды, канал асайна, дочерние доски,
-dispose/shutdown, скрипты и локали.
+самолечение пресетов, офлайн-смена пресета сессии, dispose/shutdown, скрипты и локали.
 
 ## Заметки · Notes
 
@@ -134,7 +138,20 @@ dispose/shutdown, скрипты и локали.
   воспроизводим с нуля.
 - Пуш в remote — операция человека, скрипты набора не пушат.
 - DSH-обновления иногда требуют перегенерировать пресеты ролей:
-  `bin/gen-role-presets.sh && bin/install-presets.sh` (см. KANBAN.md).
+  `bin/gen-role-presets.sh` (собирает `presets/role-presets.patch.yml` и
+  `dsh-kanban/presets/role-presets.json`). Ставить пресеты в профиль не нужно —
+  плагин регистрирует их сам; если строки когда-то ставили руками, их снимает
+  `bin/install-presets.sh --takeover` (см. KANBAN.md, «Обновление плагина и
+  пресеты»).
+
+## Обновление · Update
+
+Обновление плагина не ломает сессии: пресет сессии хранится в логе её **id**, а
+определения ролей поставляет сам плагин и регистрирует при старте. Id четырёх
+ролей стабильны — их не переименовывают. После обновления DSH пресеты
+перегенерируются в составе плагина:
+`bin/gen-role-presets.sh` → `presets/role-presets.patch.yml` (legacy) +
+`dsh-kanban/presets/role-presets.json` (самолечение) → рестарт профиля.
 
 ## Лицензия · License
 
