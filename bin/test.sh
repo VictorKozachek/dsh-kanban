@@ -25,6 +25,7 @@ echo "== рендер доски (регистрация в контексте, 
 "$NODE" "$ROOT/dsh-kanban/test/assignment.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/card-actions.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/shutdown.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/presets.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/worktree-watch.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/mockup.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/merge.test.mjs"

@@ -64,9 +64,15 @@ import {
   sessionCwdFromContext,
 } from "./card-actions.js";
 import { registerChildrenService } from "./children.js";
+import { registerRolePresets } from "./presets.js";
 
-/** Сервис, которым GUI отправляет сообщение в сессию. */
-export const inject = ["sessionController"];
+/**
+ * Сервисы, без которых плагин не стартует: `sessionController` — доставка нарядов
+ * в сессию роли, `agentPresets` — реестр пресетов, куда плагин регистрирует
+ * определения ролей (самолечение при обновлении профиля, #062). Оба живут в
+ * `@deepseek-ai/dsh-web-app`, поэтому набор требований не изменился.
+ */
+export const inject = ["sessionController", "agentPresets"];
 apply.inject = inject;
 
 /**
@@ -541,6 +547,34 @@ export function apply(ctx, config = {}) {
     // событие сами; повторный вызов гасит флаг `disposed`.
     ctx.effect?.(() => cleanup, "dsh-kanban: dispose");
     ctx.on?.("dispose", cleanup);
+
+    // Самолечение пресетов ролей (#062, issue #1): определения регистрирует сам
+    // плагин, а не профильный патч bin/install-presets.sh. Обновление или сброс
+    // профиля больше не «снимает» пресеты: id в логах сессий сохранены, сессии
+    // открываются без пересоздания. Дубликаты с legacy-строками профиля — норма,
+    // плагин пропускает их с предупреждением; выгрузка снимает определения.
+    ctx.effect?.(() => {
+      let dispose = null;
+      let disposed = false;
+      const ready = registerRolePresets({
+        agentPresets: ctx.get?.("agentPresets"),
+        log: (level, message) => log(ctx, level, message),
+      })
+        .then((result) => {
+          dispose = result.dispose;
+          if (disposed) void dispose();
+          return result;
+        })
+        .catch((error) => {
+          log(ctx, "warn", `пресеты ролей: регистрация упала: ${error?.message ?? error}`);
+          return null;
+        });
+      void ready;
+      return () => {
+        disposed = true;
+        void ready.then(() => (dispose ? dispose() : undefined));
+      };
+    }, "dsh-kanban: role presets");
 
     // Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo →
     // backlog` из GUI. Регистрируется даже без сторожевых `boards`: без них
