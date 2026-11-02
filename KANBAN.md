@@ -23,6 +23,7 @@
 | `dsh-kanban/lib/backlog-notices.js` | Чистые правила нарядов бэклога: асайн карточки в `todo` с владельцем и сигнал о недоборе `todo` |
 | `dsh-kanban/lib/card-actions.js` | Командный канал клиент→хост: асайн `backlog → todo` и возврат `todo → backlog` из GUI, host-служба `kanbanCardActions` (Typert Remote в SRC-режиме), запуск `bin/task-assign.sh` |
 | `dsh-kanban/lib/children.js` | Обзор дочерних досок: host-служба `kanbanChildren` (только чтение) — разбор `.kanban/children.json`, снимок доски ребёнка со слиянием карточек из worktree |
+| `dsh-kanban/lib/presets.js` | Самолечение пресетов ролей: регистрирует определения из `dsh-kanban/presets/role-presets.json` в реестре DSH при старте, дубликаты с legacy-строками профиля пропускает |
 | `dsh-kanban/cordis.patch.yml` | Патч-слой пакета: вставляет свой Loader-ряд |
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
 | `dsh-kanban/test/render.test.mjs` | Тест рендера: контекст, колонки, карточки, зачёркивание в `merged`, панель деталей (открытие, переключение, закрытие) |
@@ -31,6 +32,7 @@
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
 | `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
 | `dsh-kanban/test/shutdown.test.mjs` | Регрессия dispose: после выгрузки нет живых `fs.watch`/таймеров, in-flight наряд и дочерний `task-assign.sh` отменяются, повторный dispose безопасен, бюджет 200 мс на десятках досок |
+| `dsh-kanban/test/presets.test.mjs` | Тест самолечения пресетов: JSON-артефакт (id/order/plugins, `__jsExpr`), регистрация четырёх ролей, дубликаты, dispose и диагностика битого артефакта |
 | `dsh-kanban/test/children.test.mjs` | Тест host-логики обзора детей: манифест с относительными и абсолютными путями, слияние с worktree, изоляция ошибок досок, счётчики, только чтение |
 | `dsh-kanban/test/children-render.test.mjs` | Тест вкладки «Дочерние доски»: регистрация второго таба, дерево досок, счётчики, drill-down и пустые состояния, отсутствие элементов переноса |
 | `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
@@ -65,6 +67,7 @@
 | `bin/node.sh` | Найти Node для тестов и макетов: PATH сессии урезан, Homebrew-ноды в нём нет |
 | `bin/gen-role-presets.sh` | Собрать строки пресетов ролей из встроенного `standard` → `presets/role-presets.patch.yml` |
 | `presets/role-presets.patch.yml` | Сгенерированные строки пресетов ролей (ставится в патч-слой профиля) |
+| `dsh-kanban/presets/role-presets.json` | Сгенерированные определения ролей для самолечения: их регистрирует плагин при старте (артефакт внутри пакета, `!!js` → узел `__jsExpr`) |
 | `bin/install-presets.sh` | Поставить пресеты ролей в патч-слой профиля (в этой версии DSH каталог `~/.dsh/.agent-presets` не читается) |
 | `bin/render-mockup.sh` | Перерисовать макет доски в PNG |
 | `dsh-kanban/docs/board-mockup-*.png` | Макеты: доска в панели и целиком, тёмная и светлая тема |

@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { apply } from "../lib/index.js";
-import { REFILL_KEY, parseMinTodo } from "../lib/backlog-notices.js";
+import { parseMinTodo } from "../lib/backlog-notices.js";
 
 let passed = 0;
 let failed = 0;
@@ -108,9 +108,15 @@ await check("карточка приходит в todo с владельцем �
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, { boards: [board], catchUpMs: 5000, debounceMs: 20 });
-  await sleep(150);
-  writeCard(board, "101", "todo", { owner: "sess-worker", updated: "2026-10-21T11:00:00Z" });
-  assert.ok(await waitFor(() => calls.length > 0), "наряд об асайне не отправлен");
+  // Фиксированная пауза не гарантирует, что fs.watch уже встал (под нагрузкой он
+  // поднимается позже) — пишем ту же версию карточки, пока асайн не заметят:
+  // `updated` не меняется, поэтому ключ доставки тот же и «ровно один наряд» цел.
+  const deadline = Date.now() + 5000;
+  while (calls.length === 0 && Date.now() < deadline) {
+    writeCard(board, "101", "todo", { owner: "sess-worker", updated: "2026-10-21T11:00:00Z" });
+    await sleep(50);
+  }
+  assert.ok(calls.length > 0, "наряд об асайне не отправлен");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   assert.equal(calls[0].sessionId, "sess-worker");
@@ -267,19 +273,25 @@ await check("после пополнения и нового недобора �
   assert.ok(await waitFor(() => stateKeys(board).some((key) => key.startsWith("board:refill:"))), "недобор не записан");
 
   // Пополнение: карточка появилась в todo без владельца — асайна нет, недобор снят.
-  writeCard(board, "110", "todo");
-  // Синхронизация — по факту, а не по паузе: под нагрузкой обход доски с
-  // debounce может не уложиться в фиксированные 300 мс, и тогда «новый недобор»
-  // не объявляется, потому что сторож не увидел промежуточное пополнение.
-  assert.ok(
-    await waitFor(() => !stateKeys(board).includes(REFILL_KEY), 8000),
-    "сигнал недобора не снят после пополнения — стенд не проверяет повтор",
-  );
+  // Ждём не «прошло 300 мс», а факт: сторож убирает ключ недобора из файла
+  // состояния. Под нагрузкой событие fs.watch может потеряться — тогда ту же
+  // версию карточки пишем повторно, пока сторож её не увидит.
+  const refillKey = () => stateKeys(board).some((key) => key.startsWith("board:refill:"));
+  const settle = Date.now() + 5000;
+  while (refillKey() && Date.now() < settle) {
+    writeCard(board, "110", "todo");
+    await sleep(50);
+  }
+  assert.equal(refillKey(), false, "сторож не увидел пополнение todo — недобор не снят");
   assert.equal(calls.length, 1, "пополнение не должно давать наряд");
 
   // Исполнитель взял карточку — todo снова пуст, это новый недобор.
-  writeCard(board, "110", "in-progress", { owner: "sess-worker", updated: "2026-10-21T15:00:00Z" });
-  assert.ok(await waitFor(() => calls.length === 2), "новый недобор не объявлен");
+  const deadline = Date.now() + 5000;
+  while (calls.length < 2 && Date.now() < deadline) {
+    writeCard(board, "110", "in-progress", { owner: "sess-worker", updated: "2026-10-21T15:00:00Z" });
+    await sleep(50);
+  }
+  assert.equal(calls.length, 2, "новый недобор не объявлен");
   await sleep(200);
   assert.equal(calls.length, 2, `нарядов ${calls.length}`);
   assert.equal(calls[1].sessionId, "sess-dispatch");

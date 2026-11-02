@@ -2,7 +2,7 @@
 #
 # Сгенерировать пресеты ролей из встроенного пресета `standard`.
 #
-#   bin/gen-role-presets.sh [--standard ФАЙЛ] [--personas DIR] [--out ФАЙЛ]
+#   bin/gen-role-presets.sh [--standard ФАЙЛ] [--personas DIR] [--out ФАЙЛ] [--json ФАЙЛ]
 #
 # Зачем: в DSH 0.1.7 пресет — это СТРОКА композиции профиля
 # (`@deepseek-ai/dsh-agent-preset` с config.id/order/plugins), а не каталог
@@ -16,8 +16,17 @@
 #   2. <dshHome>/profiles[/<профиль>]/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml;
 #   3. внутри приложения DSH (asar) — его же Node в режиме Node.
 #
-# Результат по умолчанию: presets/role-presets.patch.yml (ставится
-# bin/install-presets.sh). Перегенерировать после обновления DSH.
+# Результаты по умолчанию:
+#   presets/role-presets.patch.yml — legacy-слой профиля (ставится
+#     bin/install-presets.sh; остаётся для совместимости);
+#   dsh-kanban/presets/role-presets.json — определения ролей для самолечения
+#     плагина (#062): их регистрирует host-половина при старте, поэтому
+#     обновление профиля больше не «снимает» пресеты. Артефакт лежит ВНУТРИ
+#     пакета плагина — только так он едет вместе с плагином в любой профиль.
+#     YAML-тег `!!js expr` в JSON — узел {"__jsExpr": "expr"}: реестр пресетов
+#     интерполирует его так же.
+# Для JSON нужен python3 с PyYAML (без него — понятная ошибка с подсказкой).
+# Перегенерировать после обновления DSH.
 #
 set -euo pipefail
 
@@ -25,6 +34,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STANDARD=""
 PERSONAS="$ROOT/agent-presets"
 OUT="$ROOT/presets/role-presets.patch.yml"
+JSON_OUT=""
 
 usage() {
   sed -n '3,/^set -euo pipefail/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'
@@ -38,6 +48,8 @@ while [[ $# -gt 0 ]]; do
     --personas=*) PERSONAS="${1#*=}"; shift ;;
     --out) OUT="${2:?--out требует значения}"; shift 2 ;;
     --out=*) OUT="${1#*=}"; shift ;;
+    --json) JSON_OUT="${2:?--json требует значения}"; shift 2 ;;
+    --json=*) JSON_OUT="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -82,11 +94,32 @@ fi
 command -v python3 >/dev/null 2>&1 || { echo "нужен python3" >&2; exit 1; }
 mkdir -p "$(dirname "$OUT")"
 
-STANDARD="$STANDARD" PERSONAS="$PERSONAS" OUT="$OUT" python3 - <<'PY'
+# JSON живёт в пакете плагина: host-половина читает его от import.meta.url, и
+# только внутри пакета он переживает установку/обновление профиля. Тесты и
+# стенды передают --json явно во временный каталог и репозиторный артефакт не
+# перезаписывают.
+if [[ -z "$JSON_OUT" ]]; then
+  if [[ "$OUT" == "$ROOT/presets/role-presets.patch.yml" ]]; then
+    JSON_OUT="$ROOT/dsh-kanban/presets/role-presets.json"
+  else
+    JSON_OUT="$(dirname "$OUT")/role-presets.json"
+  fi
+fi
+
+STANDARD="$STANDARD" PERSONAS="$PERSONAS" OUT="$OUT" JSON_OUT="$JSON_OUT" python3 - <<'PY'
+import json
 import os
 import re
 import sys
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    sys.exit(
+        "для JSON-артефакта нужен PyYAML: python3 -m pip install --user pyyaml "
+        "(или системный python3 с PyYAML); без него собирается только YAML"
+    )
 
 ROLES = [("dispatcher", 10), ("worker", 11), ("reviewer", 12), ("verifier", 13)]
 PREFIX_LINE = re.compile(r"^(?P<indent> +)prefix: .*$", re.M)
@@ -94,6 +127,7 @@ PREFIX_LINE = re.compile(r"^(?P<indent> +)prefix: .*$", re.M)
 standard = Path(os.environ["STANDARD"])
 personas = Path(os.environ["PERSONAS"])
 out_path = Path(os.environ["OUT"])
+json_path = Path(os.environ["JSON_OUT"])
 
 body = standard.read_text(encoding="utf-8")
 
@@ -164,8 +198,46 @@ for role, order in ROLES:
     name, description = read_meta(personas / role)
     chunks.append(build_role(role, order, name, description))
 
-out_path.write_text("\n".join(chunks), encoding="utf-8")
+text = "\n".join(chunks)
+out_path.write_text(text, encoding="utf-8")
+
+# ── JSON-артефакт: те же определения, форма реестра пресетов ─────────────────
+# YAML-тег `!!js expr` в JSON становится узлом {"__jsExpr": "expr"} — это
+# штатная форма диалекта entry-list: реестр пресетов интерполирует её
+# рекурсивно (dsh-agent-preset-registry, isJsExpr/evaluateExpression).
+class PresetLoader(yaml.SafeLoader):
+    pass
+
+
+def js_constructor(loader, node):
+    return {"__jsExpr": loader.construct_scalar(node)}
+
+
+PresetLoader.add_constructor("tag:yaml.org,2002:js", js_constructor)
+
+parsed = yaml.load(text, Loader=PresetLoader)
+definitions = []
+for entry in parsed or []:
+    rows = entry.get("insert") if isinstance(entry, dict) else None
+    if not rows:
+        continue
+    for row in rows:
+        config = row.get("config") if isinstance(row, dict) else None
+        if isinstance(config, dict):
+            definitions.append(config)
+
+if len(definitions) != len(ROLES):
+    sys.exit(f"в YAML-артефакте {len(definitions)} определений, а ролей {len(ROLES)}")
+for (role, order), definition in zip(ROLES, definitions):
+    if definition.get("id") != role or definition.get("order") != order:
+        sys.exit(f"JSON: роль {role} с order {order} не совпала с YAML ({definition.get('id')}/{definition.get('order')})")
+    if not definition.get("plugins"):
+        sys.exit(f"JSON: у роли {role} пустой список plugins")
+
+json_path.parent.mkdir(parents=True, exist_ok=True)
+json_path.write_text(json.dumps(definitions, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print(f"готово: {out_path} (роли: {', '.join(role for role, _ in ROLES)})")
+print(f"готово: {json_path} (определения: {len(definitions)})")
 PY
 
 if [[ -n "$TEMP_STANDARD" ]]; then rm -f "$TEMP_STANDARD"; fi

@@ -44,7 +44,16 @@
  *   bin/node.sh bin/host-shutdown-check.mjs
  *   bin/node.sh bin/host-shutdown-check.mjs --scenario control --repeat 3 --verbose
  *   bin/node.sh bin/host-shutdown-check.mjs --scenario board --settle 2500 --verbose  # дождаться самопроверки канала
+ *   bin/node.sh bin/host-shutdown-check.mjs --no-presets           # только сценарии shutdown
  *   DSH_APP_DIR="/Applications/DeepSeek Harness.app" bin/node.sh bin/host-shutdown-check.mjs
+ *
+ * Пресеты ролей (#062). Две дополнительные проверки поднимают профиль с пробным
+ * плагином, который спрашивает у реестра `agentPresets` его определения и пишет
+ * их в stderr: `presets-none` — профиль БЕЗ preset-строк (так выглядит установка
+ * после сброса/обновления профиля), `presets-legacy` — профиль с legacy-блоками
+ * из `presets/role-presets.patch.yml` (дубликаты). В обоих случаях плагин должен
+ * зарегистрировать четыре роли и не сломать старт; `--no-presets` эти проверки
+ * выключает.
  *
  * Коды возврата: 0 — все сценарии в бюджете (или приложения нет — skip);
  * 1 — какой-то сценарий не уложился: нет ack за 5с, процесс не вышел сам за 10с
@@ -95,7 +104,7 @@ const READY_TIMEOUT_MS = numberFromEnv("DSH_HARNESS_READY_TIMEOUT_MS", 90_000);
 const EXIT_SLACK_MS = 2_000;
 
 /** Имена сценариев: по ним же проверяется `--scenario`. */
-const SCENARIO_NAMES = ["control", "board", "roots", "events"];
+const SCENARIO_NAMES = ["control", "board", "roots", "events", "presets-none", "presets-legacy"];
 
 /**
  * Разобрать аргументы командной строки.
@@ -108,12 +117,13 @@ const SCENARIO_NAMES = ["control", "board", "roots", "events"];
  * @returns `{ verbose, keep, handles, scenario, repeat, help }`.
  */
 function parseArgs(argv) {
-  const parsed = { verbose: false, keep: false, handles: false, scenario: undefined, repeat: 1, settle: 120, help: false };
+  const parsed = { verbose: false, keep: false, handles: false, presets: true, scenario: undefined, repeat: 1, settle: 120, help: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--verbose") parsed.verbose = true;
     else if (arg === "--keep") parsed.keep = true;
     else if (arg === "--handles") parsed.handles = true;
+    else if (arg === "--no-presets") parsed.presets = false;
     else if (arg === "-h" || arg === "--help") parsed.help = true;
     else if (arg === "--scenario") {
       const value = argv[index + 1];
@@ -168,6 +178,7 @@ if (cli.help) {
   console.log("  --repeat    прогонов на сценарий, целое ≥ 1 (по умолчанию 1)");
   console.log("  --settle    пауза после ready до shutdown, мс (по умолчанию 120; 2500 — дождаться самопроверки канала)");
   console.log("  --handles   снять живые handles через inspector (влияет на тайминги)");
+  console.log("  --no-presets  не проверять самолечение пресетов ролей (#062)");
   console.log("  --verbose   печатать IPC-сообщения и stderr хоста");
   console.log("  --keep      не удалять временный DSH_HOME");
   process.exit(0);
@@ -180,6 +191,8 @@ const REPEAT = cli.repeat;
 const SETTLE_MS = cli.settle;
 /** Снимок handles через inspector — только по флагу: сам inspector влияет на тайминги. */
 const WANT_HANDLES = cli.handles;
+/** Проверки пресетов ролей (#062): две дополнительные сцены поверх shutdown. */
+const WANT_PRESETS = cli.presets;
 
 function numberFromEnv(name, fallback) {
   const value = Number(process.env[name]);
@@ -318,10 +331,70 @@ function prepareHome(options) {
       rows += `- id: ui-kanban\n  config:\n    boards:\n${boards.map((board) => `      - ${board}`).join("\n")}\n    roles: {}\n`;
     }
   }
+  // Legacy-строки пресетов: так выглядит профиль, где bin/install-presets.sh уже
+  // ставил роли. Плагин при этом обязан не упасть на дубликатах (#062).
+  if (options.presets === "legacy") {
+    const legacy = path.join(REPO_ROOT, "presets", "role-presets.patch.yml");
+    rows += fs.readFileSync(legacy, "utf8");
+  }
+  // Пробный плагин: спрашивает реестр agentPresets и печатает определения в
+  // stderr — единственный внешне видимый признак, что роли зарегистрированы.
+  if (options.probe) {
+    const probeDir = path.join(profile, "node_modules", "harness-presets-probe");
+    fs.mkdirSync(probeDir, { recursive: true });
+    fs.writeFileSync(path.join(probeDir, "package.json"), JSON.stringify({ name: "harness-presets-probe", private: true, type: "module", main: "index.js" }, null, 2) + "\n");
+    fs.writeFileSync(path.join(probeDir, "index.js"), PROBE_SOURCE);
+    // Именно `insert:`: голая строка `- id: …` в патч-слое — это правка уже
+    // существующей записи, а новая запись добавляется только через insert.
+    rows += `- insert:\n    - id: harness-presets-probe\n      name: 'harness-presets-probe'\n`;
+  }
   fs.writeFileSync(path.join(profile, "cordis.patch.yml"), "# Патч-слой профиля харнесса.\n" + (rows === "" ? "[]\n" : rows));
   if (options.plugin) fs.symlinkSync(PLUGIN_DIR, path.join(profile, "node_modules", "dsh-kanban"), "dir");
   return { root, home, profile, boards };
 }
+
+/**
+ * Исходник пробного плагина для проверок пресетов.
+ *
+ * Это не часть набора: файл пишется во временный профиль харнесса. Плагин ждёт
+ * службу `agentPresets`, опрашивает `list()` и печатает id определений в stderr —
+ * по этой строке харнесс видит, что роли действительно зарегистрированы.
+ */
+const PROBE_SOURCE = `export const inject = ["agentPresets"];
+const ROLES = ["dispatcher", "worker", "reviewer", "verifier"];
+export function apply(ctx) {
+  let stopped = false;
+  let timer = 0;
+  ctx.effect(() => {
+    const started = Date.now();
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const rows = await ctx.agentPresets.list();
+        const ids = rows.map((row) => row.id);
+        const mine = ROLES.filter((role) => ids.includes(role));
+        if (mine.length === ROLES.length || Date.now() - started > 20000) {
+          process.stderr.write("[harness] presets: " + ids.join(",") + "\\n");
+          process.stderr.write("[harness] roles: " + mine.join(",") + "\\n");
+          for (const row of rows) if (row.broken) process.stderr.write("[harness] preset-broken: " + row.id + "\\n");
+          return;
+        }
+      } catch (error) {
+        process.stderr.write("[harness] presets-error: " + (error?.message ?? error) + "\\n");
+        return;
+      }
+      timer = setTimeout(tick, 150);
+    };
+    timer = setTimeout(tick, 150);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, "harness-presets-probe: read registry");
+}
+`;
+
+/** Маркер: четыре роли в реестре именно в том порядке, что задаёт реестр. */
+const PRESETS_MARKER = /\[harness\] roles: dispatcher,worker,reviewer,verifier/;
+/** Битое определение в реестре — тоже провал проверки: роль не поднимется. */
+const PRESETS_BROKEN = /\[harness\] preset-broken:/;
 
 /** Доска с карточками: `.kanban/tasks` плюс board.json, как у живого проекта. */
 function makeBoard(dir, cards) {
@@ -494,6 +567,18 @@ async function runScenario(name, options) {
 
   try {
     await sentShutdown;
+    // Проверки пресетов (#062): ждём маркер от пробного плагина. Он печатается в
+    // stderr самого Host'а, поэтому сначала дожидаемся строки, потом закрываем.
+    if (options.waitFor && options.waitFor.pattern) {
+      const pattern = options.waitFor.pattern;
+      const deadline = Date.now() + (options.waitFor.timeoutMs ?? 15_000);
+      while (Date.now() < deadline && !pattern.test(row.stderr)) await sleep(100);
+      if (!pattern.test(row.stderr)) {
+        row.error = `не дождались в stderr Host'а ${pattern} за ${options.waitFor.timeoutMs ?? 15_000}мс`;
+      } else if (PRESETS_BROKEN.test(row.stderr)) {
+        row.error = `реестр пресетов сообщил о битом определении: ${(PRESETS_BROKEN.exec(row.stderr) ?? []).input ?? ""}`;
+      }
+    }
     // Сценарий «события»: пишем в доски прямо перед shutdown, чтобы дебаунс и
     // доставка нарядов были в полёте в момент закрытия.
     if (options.events) {
@@ -506,9 +591,17 @@ async function runScenario(name, options) {
       }
     }
     await sleep(SETTLE_MS);
+    row.shutdownAt = Date.now() - startedAt;
     child.send({ type: "shutdown" });
     // Ждём ровно бюджет выхода плюс запас: «не вышел» — это тоже результат.
     await Promise.race([closed, sleep(EXIT_BUDGET_MS + EXIT_SLACK_MS)]);
+    // Бюджеты DSH считаются ОТ shutdown, а не от старта процесса: 5с — время на
+    // dispose дерева плагинов, 10с — окно оболочки. ready/ack/exit печатаем для
+    // диагностики, а вердикт — по дельтам от `shutdown`.
+    if (typeof row.shutdownAt === "number") {
+      row.ackAfter = row.ackMs === null ? null : row.ackMs - row.shutdownAt;
+      row.exitAfter = row.exitMs === null ? null : row.exitMs - row.shutdownAt;
+    }
     if (WANT_HANDLES && !exited && inspectorUrl) {
       try {
         row.handles = await dumpHandles(inspectorUrl);
@@ -574,29 +667,38 @@ function printFailure(row) {
   console.log(`      stderr хоста:\n${tail(row.stderr, 20, "        ")}`);
 }
 
-/** Уложился ли сценарий в бюджеты: ack за 5с и выход за 10с. */
+/**
+ * Уложился ли сценарий в бюджеты DSH: ack за 5с и выход за 10с — считая от
+ * отправки `shutdown`, а не от старта процесса. Старт (`ready`) в бюджет не
+ * входит: `PROCESS_SHUTDOWN_TIMEOUT_MS` ограничивает dispose дерева плагинов, а
+ * 10с оболочки — ожидание выхода после `shutdown`.
+ */
 function verdict(row) {
   if (row.error) return `ошибка: ${row.error}`;
-  if (row.ackMs === null) {
-    return row.exitMs === null ? "нет ack и не вышел" : `нет ack, выход на ${row.exitMs}мс — похоже на force-exit`;
+  const ack = typeof row.ackAfter === "number" ? row.ackAfter : null;
+  const exit = typeof row.exitAfter === "number" ? row.exitAfter : null;
+  if (ack === null) {
+    return exit === null ? "нет ack и не вышел" : `нет ack, выход через ${exit}мс после shutdown — похоже на force-exit`;
   }
-  if (row.ackMs > ACK_BUDGET_MS) return `ack ${row.ackMs}мс — дольше ${ACK_BUDGET_MS}мс`;
-  if (row.killed || row.exitMs === null) return `ack ${row.ackMs}мс, но процесс не вышел за ${EXIT_BUDGET_MS}мс`;
-  if (row.exitMs - row.ackMs > EXIT_BUDGET_MS) return `выход через ${row.exitMs - row.ackMs}мс после ack — дольше бюджета`;
+  if (ack > ACK_BUDGET_MS) return `ack через ${ack}мс после shutdown — дольше ${ACK_BUDGET_MS}мс`;
+  if (row.killed || exit === null) return `ack ${ack}мс, но процесс не вышел за ${EXIT_BUDGET_MS}мс`;
+  if (exit > EXIT_BUDGET_MS) return `выход через ${exit}мс после shutdown — дольше ${EXIT_BUDGET_MS}мс`;
   if (row.code !== 0) return `выход с кодом ${row.code}`;
   if (row.signal !== null) return `выход по сигналу ${row.signal}`;
   return "ok";
 }
 
 function printTable(rows) {
-  const header = ["сценарий", "досок", "ready, мс", "ack, мс", "exit, мс", "код", "сигнал", "вердикт"];
+  // `ready` — от старта процесса; `ack`/`exit` — от отправки shutdown: именно эти
+  // дельты ограничены бюджетами DSH (5с на dispose, 10с у оболочки).
+  const header = ["сценарий", "досок", "ready, мс", "shutdown→ack", "shutdown→exit", "код", "сигнал", "вердикт"];
   const width = (value) => String(value ?? "—");
   const table = rows.map((row) => [
     row.name,
     width(row.boards),
     width(row.readyMs),
-    width(row.ackMs),
-    width(row.exitMs),
+    width(row.ackAfter),
+    width(row.exitAfter),
     width(row.code),
     width(row.signal),
     verdict(row),
@@ -634,10 +736,21 @@ async function main() {
     { name: "board", options: { plugin: true, boards: 1, roots: false, events: false } },
     { name: "roots", options: { plugin: true, boards: 30, roots: true, events: false } },
     { name: "events", options: { plugin: true, boards: 10, roots: false, events: true } },
-  ].filter((scenario) => SCENARIO_ONLY === undefined || scenario.name === SCENARIO_ONLY);
+    // Самолечение пресетов ролей (#062): профиль без preset-строк и с legacy-строками.
+    {
+      name: "presets-none",
+      options: { plugin: true, boards: 1, roots: false, events: false, presets: "none", probe: true, waitFor: { pattern: PRESETS_MARKER } },
+    },
+    {
+      name: "presets-legacy",
+      options: { plugin: true, boards: 1, roots: false, events: false, presets: "legacy", probe: true, waitFor: { pattern: PRESETS_MARKER } },
+    },
+  ]
+    .filter((scenario) => WANT_PRESETS || !scenario.name.startsWith("presets-"))
+    .filter((scenario) => SCENARIO_ONLY === undefined || scenario.name === SCENARIO_ONLY);
 
   if (scenarios.length === 0) {
-    console.error(`неизвестный сценарий: ${SCENARIO_ONLY} (есть control, board, roots, events)`);
+    console.error(`неизвестный сценарий: ${SCENARIO_ONLY} (есть ${SCENARIO_NAMES.join(", ")})`);
     return 2;
   }
 
@@ -648,7 +761,10 @@ async function main() {
   console.log(`primary runtime: ${BUNDLE.primaryRuntime ?? "не найден"}`);
   console.log(`порт Host'а: ${BUNDLE.portLiteral === null ? "динамический (литерала в энтри нет)" : BUNDLE.portLiteral === "0" ? "динамический («0» в энтри)" : `фиксированный литерал ${BUNDLE.portLiteral} — подменяем на свободный`}`);
   console.log(`плагин под тестом: ${PLUGIN_DIR}`);
-  console.log(`бюджеты: ack ≤ ${ACK_BUDGET_MS}мс, выход ≤ ${EXIT_BUDGET_MS}мс; прогонов на сценарий: ${REPEAT}; пауза до shutdown: ${SETTLE_MS}мс`);
+  console.log(`проверки пресетов ролей (#062): ${WANT_PRESETS ? "да" : "выключены (--no-presets)"}`);
+  console.log(
+    `бюджеты: ack ≤ ${ACK_BUDGET_MS}мс и выход ≤ ${EXIT_BUDGET_MS}мс — считая от shutdown; прогонов на сценарий: ${REPEAT}; пауза до shutdown: ${SETTLE_MS}мс`,
+  );
 
   const rows = [];
   for (const scenario of scenarios) {
@@ -656,7 +772,9 @@ async function main() {
       const label = REPEAT > 1 ? `${scenario.name}#${attempt}` : scenario.name;
       process.stdout.write(`\n${label}: `);
       const row = await runScenario(label, scenario.options);
-      process.stdout.write(`ready ${row.readyMs ?? "—"}мс, ack ${row.ackMs ?? "—"}мс, exit ${row.exitMs ?? "—"}мс — ${verdict(row)}\n`);
+      process.stdout.write(
+        `ready ${row.readyMs ?? "—"}мс, shutdown→ack ${row.ackAfter ?? "—"}мс, shutdown→exit ${row.exitAfter ?? "—"}мс — ${verdict(row)}\n`,
+      );
       if (row.handles) {
         console.log(`      live handles: ${(row.handles.handles ?? []).join(", ")}`);
         console.log(`      live resources: ${(row.handles.resources ?? []).join(", ")}`);

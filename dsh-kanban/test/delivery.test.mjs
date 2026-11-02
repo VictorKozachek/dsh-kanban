@@ -80,8 +80,15 @@ function makeCtx(calls, failure = null, delayMs = 0) {
         calls.push(request);
         return { accepted: true };
       }
-    }
+    },
+    // Плагин инжектит реестр пресетов (#062): без него apply не стартует.
+    agentPresets: { register: async () => async () => {} }
   };
+}
+
+/** Файл состояния сторожа: появляется после стартового обхода доски. */
+function stateFile(board) {
+  return path.join(board, ".kanban", ".watcher-state.json");
 }
 
 function stateKeys(board) {
@@ -134,19 +141,18 @@ await check("наряд записан в файл состояния и не п
 await check("переход по файлу объявляется один раз", async () => {
   const board = makeBoard([["005", "in-progress", { owner: "sess-worker" }]]);
   const calls = [];
-  apply(makeCtx(calls), { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 5000, debounceMs: 20 });
-  // Событие fs.watch на загруженной машине может прийти позже, чем запись, или
-  // потеряться при регистрации наблюдателя. Повторяем ту же запись (тот же
-  // `updated`), пока наряд не придёт: дебаунс склеивает повторы в один проход,
-  // поэтому «ровно один наряд» ниже остаётся настоящей проверкой.
-  const deadline = Date.now() + 8000;
-  let attempts = 0;
+  // Раньше здесь стоял фиксированный sleep(150) до записи карточки: на загруженной
+  // машине `fs.watch` не успевал встать, и переход «терялся» — флейк, а не
+  // поведение сторожа. Теперь запись перехода повторяется, пока сторож её не
+  // увидит. Версия карточки (`updated`) не меняется, поэтому ключ доставки тот
+  // же — повторные записи не должны давать второй наряд, и это проверяется ниже.
+  apply(makeCtx(calls), { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 20, debounceMs: 20 });
+  const deadline = Date.now() + 5000;
   while (calls.length === 0 && Date.now() < deadline) {
     writeCard(board, "005", "in-review", { owner: "sess-worker", updated: "2026-10-14T16:00:00Z" });
-    attempts += 1;
-    await sleep(250);
+    await sleep(50);
   }
-  assert.ok(calls.length > 0, `переход не объявлен (попыток записи: ${attempts})`);
+  assert.ok(calls.length > 0, "переход не объявлен");
   await sleep(200);
   assert.equal(calls.length, 1, "наряд должен уйти ровно один раз");
   assert.equal(calls[0].sessionId, "sess-reviewer");
