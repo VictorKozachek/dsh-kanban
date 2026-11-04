@@ -1,158 +1,259 @@
 # dsh-kanban
 
-Канбан-доска агентских задач для [DeepSeek Harness](https://github.com/deepseek-ai) (DSH):
-плагин в правом сайдбаре + файловый протокол задач + сторож, который сам рассылает
-наряды агентским сессиям. Несколько ролей — оркестратор, исполнители, ревьювер,
-тестировщик — работают по одной доске, не переписываясь в чате.
+**A Kanban board for agent teams inside [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).**
 
-**A Kanban board for agent tasks inside DeepSeek Harness.** Task state lives in
-`.kanban/tasks/*.md` in the project's git repository; the board reads the files,
-and the plugin's host half watches them and dispatches work notices to agent
-sessions, so several roles can work against one board.
+[Русская версия](README.ru.md) · [Features](FEATURES.md) · [Full manual](KANBAN.md) · [Agent protocol](AGENTS.md) · [MIT licensed](LICENSE)
 
-![Доска / Board](dsh-kanban/docs/board-mockup-full-dark.png)
+![The board in the right sidebar: workspaces, role sessions, chat and the Kanban tab](dsh-kanban/docs/board-mockup-panel-dark.png)
 
-Полный фичалист — [FEATURES.ru.md](FEATURES.ru.md) (русский) и
-[FEATURES.md](FEATURES.md) (English).
+*One workspace, four role sessions and the board in the right sidebar. The screenshots are
+rendered by the plugin's own mockup generator from its real style table, so the layout and
+colors are the ones you get in the app.*
 
-## Возможности · Features
+## Why this plugin exists
 
-- **Доска** в правом сайдбаре: 8 колонок (`backlog → todo → in-progress →
-  in-review → testing → ready → merged` + `blocked`), панель деталей, токены по
-  ролям, комментарии, значок «в ветке», тёмная и светлая темы.
-- **Человек в цикле:** перетаскивание мышью только `backlog ↔ todo` с асайном
-  самого свободного исполнителя (host-канал `kanbanCardActions`).
-- **Сторож доски:** наряды в сессии по переходам карточек и асайну, дедупликация,
-  повтор недоставленных, автоматический захват ролей по пресетам.
-- **Изоляция на задачу:** каждая открытая задача живёт в своём git-worktree
-  внутри проекта; карточка лежит в ветке задачи; слияние — `bin/task-commit.sh`.
-- **Очередь и бэклог:** спецификации, `minTodo`, пул исполнителей
-  (`.kanban/.workers.json`), выдача `bin/backlog-fill.sh` по слитому снимку доски.
-- **Дочерние доски:** read-only обзор дерева досок команд (манифест
-  `.kanban/children.json`, генератор `bin/board-children.sh`) — родитель видит
-  прогресс дерева, но не управляет.
-- **Восстановление пресета:** `bin/session-preset.sh` — офлайн-смена пресета
-  существующей сессии (при закрытом DSH, с бэкапом и обновлением карты ролей;
-  нужен перезапуск) — на случай, когда роль «слетела».
-- **Совместимость:** DSH 0.2.1-rc.3, macOS bash 3.2, graceful shutdown Host'а;
-  не зависит от внешних проектов-источников.
+A chat with one agent is a single conversation: tasks are done one after another, and the
+plan lives in the model's context. As soon as the work grows you want **roles** — someone
+who plans and assigns, someone who implements, someone who reviews and someone who tests —
+and you want them working **in parallel** without stepping on each other.
 
-## Требования · Requirements
+`dsh-kanban` turns that into a file-backed board:
 
-- DSH `0.2.1-rc.3` (desktop-приложение или `dsh web`) и macOS;
-- `git` — рабочие деревья задач создаются через `git worktree`;
-- `node` — для тестов и макетов (`bin/node.sh` находит его сам);
-- `bash` 3.2+ (поставляется с macOS).
+- **The board is the single source of truth.** Every task is a Markdown card in
+  `.kanban/tasks/<ID>.md` inside your git repository — with its status, owner, role, branch,
+  token spend and notes. Nothing is locked inside a chat.
+- **The plugin dispatches work.** Its host half watches the cards and sends *notices* to the
+  right agent session: "this card is yours, take it", "a card waits for review", "the queue
+  is short, refill it". No copy-pasting between chats.
+- **Every task lives in its own git worktree and branch**, so parallel executors never edit
+  the same files; merging is a scripted step, not manual git archaeology.
+- **The board is a live view** in the right sidebar: columns, cards, owners, token usage and
+  comments, updated every 3 seconds.
 
-## Установка · Install
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph Repo["Your project repository"]
+    Cards[".kanban/tasks/*.md"]
+    Worktrees["worktrees/<id> — branch task/<id>"]
+  end
+  subgraph DSH["DSH host process"]
+    Watcher["dsh-kanban host half:<br/>watcher + dispatcher"]
+    Sessions["agent sessions:<br/>dispatcher · worker · reviewer · verifier"]
+  end
+  UI["Kanban tab in the sidebar"]
+
+  Cards -- "fs.watch: cards and worktrees" --> Watcher
+  Watcher -- "notices via sessionController.prompt" --> Sessions
+  Sessions -- "edit the card, commit to the branch" --> Cards
+  UI -- "read board snapshots" --> Watcher
+  UI -- "assign / unassign from the board" --> Watcher
+  Watcher -- "runs bin/task-assign.sh" --> Cards
+```
+
+1. **Cards are files.** Any edit to a card — by an agent or by you — is picked up by the host
+   half; copies of the same card in a task worktree are merged by the newest `updated`.
+2. **Roles are sessions.** You create ordinary DSH sessions and pick a **preset** when you
+   create them: `dispatcher`, `worker`, `reviewer`, `verifier`. The presets ship with the
+   plugin and are registered on startup, so plugin updates cannot lose them. The watcher
+   recognises a session's role automatically (from the preset selection event) and stores the
+   role map in `.kanban/.watcher-roles.json`.
+3. **The dispatcher sends notices, not commands.** A notice is an ordinary queued prompt: the
+   session reads the card, checks the real status and works. Agents keep their own
+   conversation context for the whole task.
+
+## Example: one workspace, four sessions
+
+Create **one workspace** for your project — the repository root is fine — and four sessions
+inside it:
+
+| Session title | Preset | What it does |
+|---|---|---|
+| Dispatcher | `dispatcher` | slices the spec into backlog cards, assigns them, merges finished branches, keeps at most three tasks in flight |
+| Executor | `worker` | takes an assigned card, works in its task worktree, commits to the branch, hands the card to review |
+| Reviewer | `reviewer` | reads the diff: approves to testing, or returns the card with comments |
+| Tester | `verifier` | runs tests and the manual scenario: approves to ready, or returns the card with a reproduction |
+
+![Workspace and role sessions with their presets](dsh-kanban/docs/readme-sessions-dark.png)
+
+*Light theme: [workspace and sessions](dsh-kanban/docs/readme-sessions-light.png).*
+
+The flow of one task:
+
+```mermaid
+stateDiagram-v2
+  backlog --> todo: assign (owner + role)
+  todo --> in_progress: worker starts
+  in_progress --> in_review: worker finished
+  in_review --> testing: reviewer approved
+  in_review --> in_progress: reviewer returned comments
+  testing --> ready: verifier approved
+  testing --> in_progress: verifier returned a repro
+  ready --> merged: dispatcher merges
+  in_progress --> blocked: blocked
+  blocked --> in_progress: unblocked
+```
+
+A concrete run (all commands are run in the **dispatcher session**, in the project root):
+
+```bash
+# 1. Slice a task: creates worktrees/007, branch task/007 and the card inside that branch
+bin/task-new.sh "Fix the QR export"
+
+# 2. Hand it to a free executor; the watcher wakes that session with a notice
+bin/task-assign.sh 007
+
+# ... the executor works:            todo -> in-progress -> in-review
+# ... the reviewer checks the diff:  in-review -> testing
+# ... the tester verifies:           testing -> ready
+# ... then the dispatcher merges:
+bin/task-commit.sh 007      # merge --no-ff, card -> merged, worktree removed
+```
+
+While this happens the board shows every transition; the card carries the branch, the owner,
+the role and the token spend:
+
+![All eight board columns](dsh-kanban/docs/board-mockup-full-dark.png)
+
+A light theme is available too: [panel](dsh-kanban/docs/board-mockup-panel-light.png) ·
+[full board](dsh-kanban/docs/board-mockup-full-light.png).
+
+## Install
+
+**Requirements:** DeepSeek Harness `0.2.1-rc.3` (desktop app or `dsh web`) on macOS, `git` in
+the project you want to manage, and `node` for the scripts (`bin/node.sh` finds it).
 
 ```bash
 git clone https://github.com/VictorKozachek/dsh-kanban.git
 cd dsh-kanban
 
-# 1. плагин в профиль: web — штатно, desktop — тем же скриптом вручную
-bin/install-kanban.sh            # профиль web
-bin/install-kanban.sh desktop    # Electron-приложение
+# 1. Install the plugin into a DSH profile
+bin/install-kanban.sh            # profile "web" (dsh web)
+bin/install-kanban.sh desktop    # the Electron desktop app
 
-# 2. перезапустить DSH (профиль читает бандлы при старте)
+# 2. Restart DSH: profiles read their bundle list on startup
 ```
 
-Пресеты ролей (`dispatcher` / `worker` / `reviewer` / `verifier`) отдельной
-командой ставить не нужно: определения едут вместе с плагином и регистрируются
-при каждом старте, поэтому обновление или сброс профиля их не теряет, а
-существующие сессии не требуют пересоздания. Если пресеты когда-то ставили в
-профиль вручную (`bin/install-presets.sh`), старый блок убирается командой
-`bin/install-presets.sh --takeover`.
-
-После рестарта: правый сайдбар → «+» → «Канбан».
-
-**Пути к проектам.** `dsh-kanban/cordis.patch.yml` — патч-слой бандла: там
-настраиваются `boards` (проекты с доской) и `roots` (деревья, по которым сторож
-сам находит доски рабочих пространств). По умолчанию пути вычисляются от
-`$HOME` (`~/projects/...`) — поправьте под свою машину.
-
-## Быстрый старт · Quick start
+The role presets are **part of the plugin** and are registered every time the plugin starts,
+so there is no separate preset installation step and an update cannot lose them. If you are
+upgrading from an older version that installed presets into the profile by hand, clean the
+legacy block once:
 
 ```bash
-# в основном чекауте проекта — сессия с пресетом dispatcher
-bin/task-new.sh "Починить экспорт QR"       # worktrees/007 + ветка task/007 + карточка
-bin/board-status.sh                          # дамп доски
-
-# задача → исполнителю (сессия в worktrees/007 с пресетом worker)
-bin/task-move.sh 007 todo --owner "<session-id>"
-# исполнитель: in-progress → in-review, затем ревью и тесты
-# оркестратор: bin/task-commit.sh 007 — merge --no-ff + merged + уборка worktree
+bin/install-presets.sh --takeover
 ```
 
-Подробный сценарий ролей, бэклог, асайн из GUI и лимиты — в
-[KANBAN.md](KANBAN.md) и [AGENTS.md](AGENTS.md) (протокол агентов).
+**Where the plugin watches.** `dsh-kanban/cordis.patch.yml` is the plugin's bundle patch. Set
+the projects you want to manage:
 
-## Восстановление пресета · Preset recovery
+```yaml
+config:
+  boards:                       # projects whose .kanban/tasks should be served
+    - !!js process.env.HOME + '/projects/dsh-kanban'
+  roots:                        # trees to scan for boards of nested workspaces
+    - !!js process.env.HOME + '/projects/ai-fabric/aif-project'
+```
 
-Сменить пресет уже стартовавшей сессии DSH нельзя: реестр пресетов отвечает
-`agent-preset/locked`, в интерфейсе выбор есть только при создании сессии. Если
-роль «слетела», при **закрытом** DSH:
+By default the paths are computed from `$HOME`; edit them to match your machine. After a
+restart, open a conversation, click **+** in the sidebar tab strip and add **Kanban**.
+
+**Verify the installation:**
 
 ```bash
-bin/session-preset.sh --list                          # сессии, cwd, текущий пресет
-bin/session-preset.sh --session <id|prefix> --to worker --yes
-# затем перезапустите DSH
+bin/test.sh                              # full suite (479 checks), no network needed
+bin/node.sh bin/host-shutdown-check.mjs  # real Host graceful-shutdown harness (4 scenarios)
 ```
 
-Инструмент досыпает в лог сессии (`session.v4.jsonl.zstd`) один zstd-кадр с
-событием `agent-preset/selected`, делает бэкап лога в
-`~/.dsh/session-backups/` и обновляет карту ролей доски
-(`.kanban/.watcher-roles.json`). Живой DSH он не трогает: если процесс держит
-`flock` на `session.lock`, будет отказ. Для восстановления после потери
-**определений** пресетов (issue #1) достаточно обновить плагин — определения
-едут вместе с ним; подробности и ограничения — в [KANBAN.md](KANBAN.md).
+## Creating sessions with presets
 
-## Структура репозитория · Layout
+1. **Add the project as a workspace.** In the app sidebar add a workspace pointing at your
+   repository root (for the example above, one workspace for the whole team).
+2. **Create the dispatcher session.** New session → choose the **`dispatcher`** preset in the
+   preset picker. This session runs the orchestrator role.
+3. **Create the other roles.** In the same workspace create three more sessions and pick
+   **`worker`**, **`reviewer`** and **`verifier`** as presets. Titles are free; naming them
+   after their roles keeps the sidebar readable.
+4. **Open the board.** Right sidebar → **+** → **Kanban**. The board reads the cards of the
+   current workspace, so it appears as soon as the project has a `.kanban/tasks/` directory.
+5. **Check that the roles were captured.** The watcher binds each session to its role from the
+   preset selection event and stores the map in `.kanban/.watcher-roles.json` (gitignored).
+   With a single worker `bin/task-assign.sh <id>` finds it automatically. For several
+   executors, list their session IDs in `.kanban/.workers.json` — the order is the priority.
 
-| Путь | Что это |
+> **The preset is chosen at session creation.** DSH does not allow changing the preset of a
+> session that has already started a turn. The plugin guards against the practical
+> consequence — a lost preset definition — by registering the role presets itself, and there
+> is an escape hatch for already-damaged logs: `bin/session-preset.sh` (offline, DSH must be
+> closed). See [KANBAN.md](KANBAN.md).
+
+**Isolation note.** With one workspace all role sessions share the same working directory:
+the protocol keeps them apart, and every task still gets its own git worktree and branch, so
+code changes do not overlap. If you also want filesystem isolation between roles, give each
+executor its own workspace pointing at its `worktrees/<id>` directory — that is the strict
+mode described in [KANBAN.md](KANBAN.md).
+
+## The board
+
+- Eight columns: `backlog → todo → in-progress → in-review → testing → ready → merged`,
+  plus `blocked`. `backlog` is the neutral first column: sliced tasks that are not assigned
+  yet — no owner, no role.
+- A card shows its ID, title, role and owner session, the branch, token spend (per role in a
+  tooltip), the note and the update time; an **"in branch"** badge means the card is read from
+  a task worktree that is not merged yet.
+- The **details panel** (click a card) shows the description, token breakdown, role/owner, the
+  linked spec and all role comments.
+- **You move cards with the mouse only between `backlog` and `todo`** — by drag and drop or
+  with the duplicate buttons on the card. Forward is assignment: the card gets an owner and
+  the executor gets a notice. Back to backlog clears the owner and role and is only allowed
+  from `todo`. Every other transition is made by agents through `bin/task-move.sh`.
+- **Child boards.** A parent session can keep a read-only overview of a tree of boards
+  (`bin/board-children.sh` writes `.kanban/children.json`); the "Child boards" tab shows
+  per-board counters and opens a child board read-only. The parent can look, not manage.
+- **The rest of the UI:** polling every 3 s plus a ⟳ button, light and dark themes, and a
+  mockup generator that renders the screenshots in this file from the real style table
+  (`bin/render-mockup.sh`).
+
+## Day-to-day commands
+
+| Command | What it does |
 |---|---|
-| `dsh-kanban/` | плагин: `lib/client.js` (GUI), `lib/index.js` (host-сторож), `lib/watcher-core.js`, `lib/backlog-notices.js`, `lib/card-actions.js`, `lib/children.js`, `lib/presets.js` |
-| `bin/` | 21 скрипт протокола и установки (`task-*`, `board-*`, `spec-new`, `session-preset.*`, `install-*`, `test.sh`, `host-shutdown-check.mjs`) |
-| `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (формат карточки); карточки и спеки в публичный снапшот не входят |
-| `agent-presets/`, `presets/` | заготовки пресетов ролей и сгенерированные строки для профиля |
-| `.agents/skills/` | скилы DSH `kanban` и `commit` |
-| `test/`, `dsh-kanban/test/` | регрессии: 14 файлов, 479 проверок |
-| `KANBAN.md`, `FEATURES*.md`, `AGENTS.md` | руководство, фичалист (ru/en), протокол агентов |
+| `bin/task-new.sh "Title"` | create `worktrees/<id>`, branch `task/<id>` and the card in that branch |
+| `bin/task-new.sh "Title" --backlog` | slice a task into the backlog (no worktree) |
+| `bin/task-assign.sh <id>` | assign a backlog card to the least loaded executor |
+| `bin/backlog-fill.sh` | top up `todo` to `minTodo` (`.kanban/board.json`) from the backlog |
+| `bin/task-move.sh <id> <status> --note "..."` | move a card; the card is committed to the current branch |
+| `bin/task-commit.sh <id>` | merge the task branch (`--no-ff`), card → `merged`, remove the worktree |
+| `bin/board-status.sh` | text dump of the board (`--json` for machines) |
+| `bin/spec-new.sh "Title"` | create `.kanban/specs/<NNN>.md` for a feature spec |
 
-## Проверки · Tests
+Rules the protocol enforces: one `in-progress` per executor, at most three tasks in flight
+(in-progress + in-review + testing), only the dispatcher assigns and merges, and `git push` is
+a human step. The full agent protocol is in [AGENTS.md](AGENTS.md); the complete user manual
+with architecture, isolation details and troubleshooting is in [KANBAN.md](KANBAN.md).
 
-```bash
-bin/test.sh                                   # весь набор: 479 проверок, должен быть зелёным
-bin/node.sh bin/host-shutdown-check.mjs       # реальный graceful shutdown Host'а (4 сценария)
-```
+## Repository layout
 
-`bin/test.sh` не требует сети и работает из чистого клона: логика доски, рендер
-без браузера, слияние worktree-копий, наряды, канал асайна, дочерние доски,
-самолечение пресетов, офлайн-смена пресета сессии, dispose/shutdown, скрипты и локали.
+| Path | What it is |
+|---|---|
+| `dsh-kanban/` | the DSH plugin: `lib/client.js` (board tab), `lib/index.js` (host watcher/dispatcher), `lib/watcher-core.js`, `lib/card-actions.js`, `lib/children.js`, `lib/presets.js` |
+| `bin/` | 21 protocol and installation scripts (`task-*`, `board-*`, `spec-new`, `install-*`, `session-preset`, `test.sh`, `host-shutdown-check.mjs` …) |
+| `.kanban/` | `board.json` (`minTodo`), `tasks/README.md` (card format); task cards and specs are local working history and are not published |
+| `agent-presets/`, `presets/` | role preset sources and the generated preset artifact |
+| `.agents/skills/` | the DSH skills `kanban` and `commit` |
+| `FEATURES.md`, `FEATURES.ru.md` | the long feature list (English / Russian) |
+| `KANBAN.md`, `AGENTS.md` | user manual and agent protocol |
 
-## Заметки · Notes
+## Requirements and verification
 
-- **Публичный снапшот:** карточки задач и спецификации — локальная рабочая
-  история; в репозиторий они не входят. Формат карточки и протокол описаны в
-  `.kanban/tasks/README.md`, `AGENTS.md` и `KANBAN.md`, так что проект
-  воспроизводим с нуля.
-- Пуш в remote — операция человека, скрипты набора не пушат.
-- DSH-обновления иногда требуют перегенерировать пресеты ролей:
-  `bin/gen-role-presets.sh` (собирает `presets/role-presets.patch.yml` и
-  `dsh-kanban/presets/role-presets.json`). Ставить пресеты в профиль не нужно —
-  плагин регистрирует их сам; если строки когда-то ставили руками, их снимает
-  `bin/install-presets.sh --takeover` (см. KANBAN.md, «Обновление плагина и
-  пресеты»).
+- DSH `0.2.1-rc.3`, macOS (bash 3.2), git; node comes from DSH via `bin/node.sh`.
+- `bin/test.sh` — 479 checks, no network: card parsing, worktree merging, notice planning,
+  client rendering without a browser, the assign channel, child boards, presets
+  self-healing, graceful shutdown, scripts and locales.
+- `bin/node.sh bin/host-shutdown-check.mjs` — boots a real Host process and checks that the
+  plugin releases everything in time (the same path DSH uses when updating the app).
+- Python is only needed for the mockup checks and rendering (`bin/render-mockup.sh --html`).
 
-## Обновление · Update
-
-Обновление плагина не ломает сессии: пресет сессии хранится в логе её **id**, а
-определения ролей поставляет сам плагин и регистрирует при старте. Id четырёх
-ролей стабильны — их не переименовывают. После обновления DSH пресеты
-перегенерируются в составе плагина:
-`bin/gen-role-presets.sh` → `presets/role-presets.patch.yml` (legacy) +
-`dsh-kanban/presets/role-presets.json` (самолечение) → рестарт профиля.
-
-## Лицензия · License
+## License
 
 [MIT](LICENSE).

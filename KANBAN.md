@@ -73,7 +73,8 @@
 | `dsh-kanban/docs/board-mockup-*.png` | Макеты: доска в панели и целиком, тёмная и светлая тема |
 | `dsh-kanban/docs/build-mockup.mjs`, `dsh-kanban/docs/dump-styles.mjs`, `dsh-kanban/docs/render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
 
-> `README.md` проекта — заметки самого проекта, набор их не трогает.
+| `README.md`, `README.ru.md` | Пользовательская документация: зачем плагин, пример с одним воркспейсом и четырьмя сессиями ролей, установка и создание сессий (EN / RU) |
+| `dsh-kanban/docs/readme-sessions-*.png` | Кадры сайдбара с воркспейсом и сессиями ролей для README (нарезаны из макета, тёмная и светлая тема) |
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
 > `bin/`, `dsh-kanban/` в любой проект.
 

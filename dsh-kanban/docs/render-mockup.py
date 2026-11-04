@@ -526,7 +526,12 @@ def build_frame(board, board_w, board_h, view, theme):
         y += 28
     canvas.text(12, y + 16, "СЕССИИ · DEMO", f10, composite(text, 0.4, panel))
     y += 36
-    for name, color, badge, active in [("Диспетчер", "#f59e0b", "сейчас", True), ("Верификатор", "#94a3b8", "", False)]:
+    for name, color, badge, active in [
+        ("Диспетчер", "#f59e0b", "dispatcher", True),
+        ("Исполнитель", "#0ea5e9", "worker", False),
+        ("Ревьювер", "#8b5cf6", "reviewer", False),
+        ("Верификатор", "#94a3b8", "verifier", False),
+    ]:
         if active:
             canvas.rect(8, y - 3, left_w - 16, 26, radius=7, fill=panel2)
         canvas.rect(16, y + 5, 7, 7, radius=4, fill=hex_rgb(color))
