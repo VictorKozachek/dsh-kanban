@@ -109,7 +109,7 @@ function fakeRunner(root, snapshot) {
   return async (options) => {
     calls.push({ root: options.root, args: [...options.args] });
     const terminal = options.args.includes("--unassign") ? "backlog" : "todo";
-    const owner = terminal === "todo" ? "sess-free" : "";
+    const owner = terminal === "todo" ? "session-38b74d48-06fb-4a40-87b9-c759bd5158db" : "";
     writeCard(options.root, options.args[0], terminal, owner);
     return { ok: true, code: 0, stdout: "assay done", stderr: "" };
   };
@@ -131,13 +131,13 @@ function makeActions(root, options = {}) {
 console.log("== проверка запроса: только sessionId и cardId");
 
 check("корректный запрос принимается", () => {
-  const checked = validateRequest({ sessionId: "session-abc", cardId: "047" });
+  const checked = validateRequest({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(checked.ok, true);
-  assert.deepEqual(checked.value, { sessionId: "session-abc", cardId: "047" });
+  assert.deepEqual(checked.value, { sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
 });
 check("cardId: только номер из трёх и более цифр", () => {
   for (const bad of ["1", "12", "../047", "047.md", "047a", "/etc/passwd", "", 47, null]) {
-    assert.equal(validateRequest({ sessionId: "session-abc", cardId: bad }).ok, false, `приняли ${JSON.stringify(bad)}`);
+    assert.equal(validateRequest({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: bad }).ok, false, `приняли ${JSON.stringify(bad)}`);
   }
   assert.equal(CARD_ID_PATTERN.test("047"), true);
   assert.equal(CARD_ID_PATTERN.test("1234"), true);
@@ -148,7 +148,7 @@ check("sessionId: идентификатор, а не произвольная �
   }
 });
 check("лишние поля в запросе отвергаются (никаких команд и путей)", () => {
-  const checked = validateRequest({ sessionId: "session-abc", cardId: "047", command: "rm -rf /" });
+  const checked = validateRequest({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047", command: "rm -rf /" });
   assert.equal(checked.ok, false);
   assert.match(checked.message, /лишние поля/);
 });
@@ -185,17 +185,17 @@ console.log("== асайн: backlog → todo");
 await checkAsync("асайн вызывает bin/task-assign.sh с номером карточки и отдаёт новый статус", async () => {
   const root = makeBoard("assign-ok");
   const actions = makeActions(root);
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.deepEqual(result.ok, true, JSON.stringify(result));
   assert.equal(result.status, "todo");
-  assert.equal(result.owner, "sess-free");
+  assert.equal(result.owner, "session-38b74d48-06fb-4a40-87b9-c759bd5158db");
   assert.match(result.message, /#047/);
   assert.deepEqual(calls, [{ root, args: ["047"] }], "скрипт должен получить только номер карточки");
 });
 await checkAsync("карточка не в backlog — отказ, скрипт не запускается", async () => {
   const root = makeBoard("assign-wrong", "todo");
   const actions = makeActions(root);
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.equal(result.status, "todo");
   assert.match(result.message, /только из backlog/);
@@ -204,7 +204,7 @@ await checkAsync("карточка не в backlog — отказ, скрипт 
 await checkAsync("карточки нет на доске — отказ", async () => {
   const root = makeBoard("assign-missing", "backlog");
   const actions = makeActions(root);
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "999" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "999" });
   assert.equal(result.ok, false);
   assert.match(result.message, /не найдена/);
   assert.deepEqual(calls, []);
@@ -218,7 +218,7 @@ await checkAsync("неизвестная сессия — отказ", async () 
     runScript: fakeRunner(root),
     log: () => {},
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.match(result.message, /сессия не найдена/);
   assert.deepEqual(calls, []);
@@ -232,7 +232,7 @@ await checkAsync("сессия вне досок конфига — отказ",
     runScript: fakeRunner(root),
     log: () => {},
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.match(result.message, /не привязана/);
   assert.deepEqual(calls, []);
@@ -245,7 +245,7 @@ await checkAsync("все заняты (код 4) — отказ с тексто�
       return { ok: false, code: 4, stdout: "все заняты\n", stderr: "" };
     },
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.equal(result.status, "backlog");
   assert.match(result.message, /все исполнители заняты/);
@@ -256,7 +256,7 @@ await checkAsync("скрипта асайна ещё нет — понятный
   const actions = makeActions(root, {
     runScript: async () => ({ ok: false, code: "missing", stdout: "", stderr: "" }),
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.match(result.message, /bin\/task-assign\.sh/);
 });
@@ -268,7 +268,7 @@ await checkAsync("скрипт вернул 0, но карточка не изм
       return { ok: true, code: 0, stdout: "выдано: #047 → w1\n", stderr: "" };
     },
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false, `канал отрапортовал успех без изменений: ${JSON.stringify(result)}`);
   assert.equal(result.status, "backlog");
   assert.match(result.message, /осталась в backlog/);
@@ -288,7 +288,7 @@ await checkAsync("скрипт вернул 0, карточка в todo без �
       return { ok: true, code: 0, stdout: "", stderr: "" };
     },
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.status, "todo");
   assert.match(result.message, /без исполнителя/);
@@ -301,7 +301,7 @@ await checkAsync("падение самого канала не роняет о�
       throw new Error("ENOENT: bin/task-assign.sh");
     },
   });
-  const result = await actions.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.match(result.message, /канал асайна упал/);
 });
@@ -312,9 +312,9 @@ console.log("== возврат: todo → backlog");
 
 await checkAsync("возврат из todo снимает владельца и запускает скрипт с --unassign", async () => {
   const root = makeBoard("unassign-ok", "todo");
-  writeCard(root, "047", "todo", "sess-worker");
+  writeCard(root, "047", "todo", "session-6af8ff46-f3e7-4640-8a2d-045543fbc030");
   const actions = makeActions(root);
-  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.unassign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, true);
   assert.equal(result.status, "backlog");
   assert.deepEqual(calls, [{ root, args: ["047", "--unassign"] }]);
@@ -322,33 +322,33 @@ await checkAsync("возврат из todo снимает владельца и 
 });
 await checkAsync("возврат: скрипт вернул 0, но карточка осталась в todo — отказ", async () => {
   const root = makeBoard("unassign-noop", "todo");
-  writeCard(root, "047", "todo", "sess-worker", "worker");
+  writeCard(root, "047", "todo", "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", "worker");
   const actions = makeActions(root, {
     runScript: async () => {
       calls.push({ root, args: ["047", "--unassign"] });
       return { ok: true, code: 0, stdout: "возврат: #047 → backlog\n", stderr: "" };
     },
   });
-  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.unassign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false, `канал отрапортовал успех без изменений: ${JSON.stringify(result)}`);
   assert.equal(result.status, "todo");
   assert.match(result.message, /осталась в todo/);
   assert.match(result.message, /возврат не подтверждён/);
   const card = fileSnapshot(root).get("047");
   assert.equal(card.status, "todo");
-  assert.equal(card.owner, "sess-worker");
+  assert.equal(card.owner, "session-6af8ff46-f3e7-4640-8a2d-045543fbc030");
 });
 await checkAsync("возврат: карточка в backlog, но владелец/роль не сняты — отказ", async () => {
   const root = makeBoard("unassign-dirty", "todo");
-  writeCard(root, "047", "todo", "sess-worker", "worker");
+  writeCard(root, "047", "todo", "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", "worker");
   const actions = makeActions(root, {
     runScript: async (options) => {
       calls.push({ root: options.root, args: [...options.args] });
-      writeCard(options.root, options.args[0], "backlog", "sess-worker", "worker");
+      writeCard(options.root, options.args[0], "backlog", "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", "worker");
       return { ok: true, code: 0, stdout: "", stderr: "" };
     },
   });
-  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.unassign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.status, "backlog");
   assert.match(result.message, /владелец и роль/);
@@ -357,7 +357,7 @@ await checkAsync("возврат: карточка в backlog, но владел
 await checkAsync("из in-progress вернуть нельзя — карточку двигают агенты", async () => {
   const root = makeBoard("unassign-progress", "in-progress");
   const actions = makeActions(root);
-  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.unassign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.equal(result.status, "in-progress");
   assert.match(result.message, /только из todo/);
@@ -366,7 +366,7 @@ await checkAsync("из in-progress вернуть нельзя — карточ�
 await checkAsync("из backlog возврат отклоняется (карточка уже в очереди)", async () => {
   const root = makeBoard("unassign-backlog", "backlog");
   const actions = makeActions(root);
-  const result = await actions.unassign({ sessionId: "session-abc", cardId: "047" });
+  const result = await actions.unassign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, false);
   assert.match(result.message, /только из todo/);
   assert.deepEqual(calls, []);
@@ -389,13 +389,13 @@ await checkAsync("запросы канала выполняются после�
       log.push(`start ${options.args[0]}`);
       await new Promise((done) => setTimeout(done, 10));
       log.push(`end ${options.args[0]}`);
-      writeCard(root, options.args[0], "todo", "sess-free");
+      writeCard(root, options.args[0], "todo", "session-38b74d48-06fb-4a40-87b9-c759bd5158db");
       return { ok: true, code: 0, stdout: "", stderr: "" };
     },
   });
   const [first, second] = await Promise.all([
-    actions.assign({ sessionId: "session-abc", cardId: "047" }),
-    actions.assign({ sessionId: "session-abc", cardId: "048" }),
+    actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" }),
+    actions.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "048" }),
   ]);
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
@@ -460,7 +460,7 @@ check("методы службы возвращают результат, а н�
     log: () => {},
   });
   const service = ctx.get(SERVICE_KEY);
-  const result = await service.assign({ sessionId: "session-abc", cardId: "047" });
+  const result = await service.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "047" });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.status, "todo");
   // SRC-режим разбирает имена параметров из исходника метода: деструктуризация,
@@ -527,7 +527,7 @@ await checkAsync("lease освобождается, cwd читается", async
       name === "sessionQuery"
         ? {
             observeSession: async () => ({
-              header: { id: "session-abc", cwd: "/tmp/project" },
+              header: { id: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cwd: "/tmp/project" },
               [Symbol.dispose]: () => {
                 disposed += 1;
               },
@@ -535,11 +535,11 @@ await checkAsync("lease освобождается, cwd читается", async
           }
         : undefined,
   };
-  assert.equal(await sessionCwdFromContext(ctx, "session-abc"), "/tmp/project");
+  assert.equal(await sessionCwdFromContext(ctx, "session-df98a854-4084-4ba1-8fbc-f00faea193bf"), "/tmp/project");
   assert.equal(disposed, 1, "lease не освобождён");
 });
 await checkAsync("без службы sessionQuery — null", async () => {
-  assert.equal(await sessionCwdFromContext({ get: () => undefined }, "session-abc"), null);
+  assert.equal(await sessionCwdFromContext({ get: () => undefined }, "session-df98a854-4084-4ba1-8fbc-f00faea193bf"), null);
 });
 await checkAsync("неизвестная сессия — исключение, его переводит в отказ вызывающий", async () => {
   const ctx = {
@@ -549,7 +549,7 @@ await checkAsync("неизвестная сессия — исключение, 
       },
     }),
   };
-  await assert.rejects(() => sessionCwdFromContext(ctx, "session-abc"), /session not found/);
+  await assert.rejects(() => sessionCwdFromContext(ctx, "session-df98a854-4084-4ba1-8fbc-f00faea193bf"), /session not found/);
 });
 
 // ── сквозная регрессия: настоящие bin/task-assign.sh и bin/task-move.sh ─────
@@ -682,7 +682,7 @@ await checkAsync("асайн карточки в рабочем дереве: to
   try {
     const service = ctx.get(SERVICE_KEY);
     assert.ok(service, "служба канала не зарегистрирована в контексте");
-    const result = await service.assign({ sessionId: "session-abc", cardId: "030" });
+    const result = await service.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "030" });
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.status, "todo");
     assert.equal(result.owner, "w1");
@@ -709,7 +709,7 @@ await checkAsync("повторный асайн — бизнес-отказ, к�
   apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
   try {
     const before = fs.readFileSync(path.join(repo, ".kanban", "tasks", "031.md"), "utf8");
-    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "031" });
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "031" });
     assert.equal(result.ok, false);
     assert.equal(result.status, "todo");
     assert.match(result.message, /только из backlog/);
@@ -726,7 +726,7 @@ await checkAsync("чужой статус (in-progress) — отказ, скри
   apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
   try {
     const before = fs.readFileSync(path.join(repo, ".kanban", "tasks", "032.md"), "utf8");
-    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "032" });
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "032" });
     assert.equal(result.ok, false);
     assert.equal(result.status, "in-progress");
     assert.match(result.message, /только из backlog/);
@@ -745,7 +745,7 @@ await checkAsync("все заняты: настоящий скрипт даёт 
   const { ctx } = makeChannelContext({ sessionCwd: repo });
   apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
   try {
-    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "033" });
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "033" });
     assert.equal(result.ok, false);
     assert.equal(result.status, "backlog");
     assert.match(result.message, /все исполнители заняты/);
@@ -762,7 +762,7 @@ await checkAsync("нет bin/task-assign.sh — понятный отказ", as
   const { ctx } = makeChannelContext({ sessionCwd: root });
   apply(ctx, { boards: [root], catchUpMs: 5, debounceMs: 1 });
   try {
-    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-abc", cardId: "034" });
+    const result = await ctx.get(SERVICE_KEY).assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "034" });
     assert.equal(result.ok, false);
     assert.match(result.message, /bin\/task-assign\.sh/);
   } finally {
@@ -778,7 +778,7 @@ await checkAsync("возврат в очередь настоящим скрип
   const { ctx } = makeChannelContext({ sessionCwd: repo });
   apply(ctx, { boards: [repo], catchUpMs: 5, debounceMs: 1 });
   try {
-    const result = await ctx.get(SERVICE_KEY).unassign({ sessionId: "session-abc", cardId: "035" });
+    const result = await ctx.get(SERVICE_KEY).unassign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "035" });
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.status, "backlog");
     const fields = readFields(path.join(repo, ".kanban", "tasks", "035.md"));

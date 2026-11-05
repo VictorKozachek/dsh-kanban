@@ -216,7 +216,7 @@ const card = parseCard(
     'id: "007"',
     'title: "QR для нового клиента"',
     "status: testing",
-    'owner: "session-abc"',
+    'owner: "session-df98a854-4084-4ba1-8fbc-f00faea193bf"',
     'branch: "task/007"',
     'worktree: "/tmp/demo-t007"',
     'spec: "001"',
@@ -230,7 +230,7 @@ const card = parseCard(
 assert.equal(card.id, "007");
 assert.equal(card.title, "QR для нового клиента");
 assert.equal(card.status, "testing");
-assert.equal(card.owner, "session-abc");
+assert.equal(card.owner, "session-df98a854-4084-4ba1-8fbc-f00faea193bf");
 assert.equal(card.branch, "task/007");
 assert.equal(card.spec, "001", "ссылка на спецификацию читается из поля spec");
 assert.equal(card.note, "тесты 12/12");
@@ -334,7 +334,7 @@ const files = {
   ".kanban/tasks/007.md": "---\nid: 007\ntitle: Седьмая (старая копия)\nstatus: todo\nupdated: 2026-09-23T15:00:00Z\n---\n",
   ".kanban/tasks/001.md": readText["001.md"],
   // из ветки приходит более свежий статус той же задачи
-  "/tmp/demo-t007/.kanban/tasks/007.md": "---\nid: 007\ntitle: Седьмая\nstatus: in-progress\nowner: sess-7\nbranch: task/007\nupdated: 2026-09-23T16:10:00Z\n---\n",
+  "/tmp/demo-t007/.kanban/tasks/007.md": "---\nid: 007\ntitle: Седьмая\nstatus: in-progress\nowner: session-ddea6b89-485a-482d-874f-2f60f897cad1\nbranch: task/007\nupdated: 2026-09-23T16:10:00Z\n---\n",
   // новая задача, которой в основном чекауте ещё нет
   "/tmp/demo-t009/.kanban/tasks/009.md": "---\nid: 009\ntitle: Девятая из ветки\nstatus: testing\nupdated: 2026-09-23T16:20:00Z\n---\n"
 };
@@ -366,7 +366,7 @@ assert.equal(merged.ok, true);
 const byId = Object.fromEntries(merged.value.cards.map((item) => [item.id, item]));
 assert.deepEqual([...Object.keys(byId)].sort(), ["001", "007", "009"], "должны остаться 001, 007 и 009");
 assert.equal(byId["007"].status, "in-progress", "из ветки приходит более свежий статус");
-assert.equal(byId["007"].owner, "sess-7");
+assert.equal(byId["007"].owner, "session-ddea6b89-485a-482d-874f-2f60f897cad1");
 assert.equal(byId["007"].source, "worktree");
 assert.equal(byId["007"].path, "/tmp/demo-t007/.kanban/tasks/007.md");
 assert.equal(byId["001"].source, "main");
@@ -475,7 +475,7 @@ const scanRemote = {
         externalReads += 1;
         return {
           ok: true,
-          value: { text: "---\nid: 002\ntitle: Из рабочего дерева\nstatus: testing\nowner: sess-2\nupdated: 2026-09-23T16:30:00Z\n---\n" }
+          value: { text: "---\nid: 002\ntitle: Из рабочего дерева\nstatus: testing\nowner: session-2b8ea975-8113-41ae-825c-feb50cbe084a\nupdated: 2026-09-23T16:30:00Z\n---\n" }
         };
       }
       return { ok: false, error: { code: "workspace-file/not-found" } };

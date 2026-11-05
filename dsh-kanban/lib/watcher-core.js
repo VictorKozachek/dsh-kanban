@@ -10,6 +10,42 @@
  * решает, кого будить.
  */
 
+import path from "node:path";
+
+/**
+ * Самый глубокий наблюдаемый корень, содержащий `cwd` (или `null`).
+ *
+ * Порядок `roots` не должен решать, к какой доске относится сессия: доски могут
+ * быть вложенными (компонентные проекты), и тогда родительская доска — тоже
+ * наблюдаемый корень. Раньше возвращался первый совпавший корень, поэтому сессия
+ * во вложенной доске считалась «вне доски» и наряд молча пропускался (issue #2).
+ */
+export function pickBoardRoot(roots, cwd) {
+  if (typeof cwd !== "string" || cwd === "") return null;
+  const target = path.resolve(cwd);
+  let best = null;
+  for (const entry of roots ?? []) {
+    const root = path.resolve(String(entry));
+    if (target !== root && !target.startsWith(root + path.sep)) continue;
+    if (best === null || root.length > best.length) best = root;
+  }
+  return best;
+}
+
+/**
+ * Похоже ли значение на id сессии DSH: `session-<uuid>` или просто `<uuid>`.
+ *
+ * В `owner` исторически попадали человекочитаемые метки («executor-skills
+ * (DSH)»), и сторож пытался отправить такой «сессии» наряд: prompt падал
+ * `session not found`, наряд навсегда оседал в `.watcher-pending.json`.
+ * Такие владельцы надо не отправлять, а предупреждать (issue #2).
+ */
+export function isSessionId(value) {
+  if (typeof value !== "string") return false;
+  const id = value.trim();
+  return /^(?:session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 /**
  * Поля front matter, которые влияют на решение (остальное читает доска).
  * `updated` нужен для ключа доставки: по нему видно, что карточка ушла в статус

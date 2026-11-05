@@ -113,13 +113,13 @@ await check("карточка приходит в todo с владельцем �
   // `updated` не меняется, поэтому ключ доставки тот же и «ровно один наряд» цел.
   const deadline = Date.now() + 5000;
   while (calls.length === 0 && Date.now() < deadline) {
-    writeCard(board, "101", "todo", { owner: "sess-worker", updated: "2026-10-21T11:00:00Z" });
+    writeCard(board, "101", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", updated: "2026-10-21T11:00:00Z" });
     await sleep(50);
   }
   assert.ok(calls.length > 0, "наряд об асайне не отправлен");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-worker");
+  assert.equal(calls[0].sessionId, "session-6af8ff46-f3e7-4640-8a2d-045543fbc030");
   assert.equal(calls[0].mode, "queue");
   assert.equal(calls[0].content[0].type, "text");
   const text = calls[0].content[0].text;
@@ -134,18 +134,18 @@ await check("карточка приходит в todo с владельцем �
 });
 
 await check("карточка уже закреплена на старте — наряд уходит", async () => {
-  const board = makeBoard([["102", "todo", { owner: "sess-worker" }]]);
+  const board = makeBoard([["102", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, { boards: [board], catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length > 0), "стартовый асайн не объявлен");
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-worker");
+  assert.equal(calls[0].sessionId, "session-6af8ff46-f3e7-4640-8a2d-045543fbc030");
   ctx.pick("dispose")();
 });
 
 await check("асайн не повторяется при перезапуске сторожа", async () => {
-  const board = makeBoard([["103", "todo", { owner: "sess-worker" }]]);
+  const board = makeBoard([["103", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const calls = [];
   const first = makeCtx(calls);
   apply(first, { boards: [board], catchUpMs: 20, debounceMs: 20 });
@@ -165,28 +165,28 @@ await check("асайн не повторяется при перезапуск�
 });
 
 await check("смена владельца в todo даёт новый наряд", async () => {
-  const board = makeBoard([["104", "todo", { owner: "sess-first" }]]);
+  const board = makeBoard([["104", "todo", { owner: "session-bdd64920-57f1-42d3-8f70-1729d3d70ba0" }]]);
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, { boards: [board], catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length === 1), "первый асайн не объявлен");
-  assert.equal(calls[0].sessionId, "sess-first");
+  assert.equal(calls[0].sessionId, "session-bdd64920-57f1-42d3-8f70-1729d3d70ba0");
   assert.ok(
     await waitFor(() => stateKeys(board).some((key) => key.startsWith("104:todo:"))),
     "первый асайн не записан в файл состояния",
   );
 
   // Переназначение: тот же статус, другой владелец — будить нужно нового.
-  writeCard(board, "104", "todo", { owner: "sess-second", updated: "2026-10-21T12:00:00Z" });
+  writeCard(board, "104", "todo", { owner: "session-be222977-cc93-4ab5-8678-16d8c2aee82a", updated: "2026-10-21T12:00:00Z" });
   assert.ok(await waitFor(() => calls.length === 2), "нового владельца не разбудили");
   await sleep(200);
   assert.equal(calls.length, 2, `нарядов ${calls.length}`);
-  assert.equal(calls[1].sessionId, "sess-second");
+  assert.equal(calls[1].sessionId, "session-be222977-cc93-4ab5-8678-16d8c2aee82a");
   ctx.pick("dispose")();
 });
 
 await check("обновление карточки в todo без смены владельца не будит", async () => {
-  const board = makeBoard([["105", "todo", { owner: "sess-worker" }]]);
+  const board = makeBoard([["105", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, { boards: [board], catchUpMs: 20, debounceMs: 20 });
@@ -194,7 +194,7 @@ await check("обновление карточки в todo без смены в�
   assert.ok(await waitFor(() => stateKeys(board).length > 0), "асайн не записан");
 
   // Та же карточка, тот же владелец, новая версия — асайна быть не должно.
-  writeCard(board, "105", "todo", { owner: "sess-worker", updated: "2026-10-21T13:00:00Z" });
+  writeCard(board, "105", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", updated: "2026-10-21T13:00:00Z" });
   await sleep(300);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   ctx.pick("dispose")();
@@ -204,7 +204,7 @@ await check("todo без владельца, backlog и карточка в ра
   const board = makeBoard([
     ["106", "todo"],
     ["107", "backlog"],
-    ["108", "in-progress", { owner: "sess-worker" }],
+    ["108", "in-progress", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }],
   ]);
   const calls = [];
   const ctx = makeCtx(calls);
@@ -215,7 +215,7 @@ await check("todo без владельца, backlog и карточка в ра
 });
 
 await check("переход из todo в работу асайна не даёт", async () => {
-  const board = makeBoard([["109", "todo", { owner: "sess-worker" }]]);
+  const board = makeBoard([["109", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const calls = [];
   const ctx = makeCtx(calls);
   apply(ctx, { boards: [board], catchUpMs: 20, debounceMs: 20 });
@@ -223,7 +223,7 @@ await check("переход из todo в работу асайна не даёт
   assert.ok(await waitFor(() => stateKeys(board).length > 0), "асайн не записан");
 
   // Исполнитель взял задачу — асайн уже не нужен.
-  writeCard(board, "109", "in-progress", { owner: "sess-worker", updated: "2026-10-21T14:00:00Z" });
+  writeCard(board, "109", "in-progress", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", updated: "2026-10-21T14:00:00Z" });
   await sleep(300);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
   ctx.pick("dispose")();
@@ -233,10 +233,10 @@ await check("недобор todo будит диспетчера один раз
   const board = makeBoard([], { minTodo: 2 });
   const calls = [];
   const ctx = makeCtx(calls);
-  apply(ctx, { boards: [board], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(ctx, { boards: [board], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length > 0), "наряд о недоборе не отправлен");
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-dispatch");
+  assert.equal(calls[0].sessionId, "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85");
   const text = calls[0].content[0].text;
   assert.ok(text.includes("в todo 0 < 2"), `в наряде нет чисел недобора: ${text}`);
   assert.ok(text.includes("bin/backlog-fill.sh"), `в наряде нет команды пополнения: ${text}`);
@@ -248,7 +248,7 @@ await check("недобор не повторяется при перезапу�
   const board = makeBoard([], { minTodo: 2 });
   const calls = [];
   const first = makeCtx(calls);
-  apply(first, { boards: [board], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(first, { boards: [board], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length > 0), "первый наряд о недоборе не отправлен");
   assert.ok(
     await waitFor(() => stateKeys(board).some((key) => key.startsWith("board:refill:"))),
@@ -258,7 +258,7 @@ await check("недобор не повторяется при перезапу�
 
   const again = [];
   const second = makeCtx(again);
-  apply(second, { boards: [board], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(second, { boards: [board], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   await sleep(300);
   assert.equal(again.length, 0, "повторный запуск объявил недобор снова");
   second.pick("dispose")();
@@ -268,7 +268,7 @@ await check("после пополнения и нового недобора �
   const board = makeBoard([], { minTodo: 1 });
   const calls = [];
   const ctx = makeCtx(calls);
-  apply(ctx, { boards: [board], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(ctx, { boards: [board], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length === 1), "первый недобор не объявлен");
   assert.ok(await waitFor(() => stateKeys(board).some((key) => key.startsWith("board:refill:"))), "недобор не записан");
 
@@ -288,13 +288,13 @@ await check("после пополнения и нового недобора �
   // Исполнитель взял карточку — todo снова пуст, это новый недобор.
   const deadline = Date.now() + 5000;
   while (calls.length < 2 && Date.now() < deadline) {
-    writeCard(board, "110", "in-progress", { owner: "sess-worker", updated: "2026-10-21T15:00:00Z" });
+    writeCard(board, "110", "in-progress", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", updated: "2026-10-21T15:00:00Z" });
     await sleep(50);
   }
   assert.equal(calls.length, 2, "новый недобор не объявлен");
   await sleep(200);
   assert.equal(calls.length, 2, `нарядов ${calls.length}`);
-  assert.equal(calls[1].sessionId, "sess-dispatch");
+  assert.equal(calls[1].sessionId, "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85");
   ctx.pick("dispose")();
 });
 
@@ -302,7 +302,7 @@ await check("нет board.json — минимум 1", async () => {
   const empty = makeBoard([]);
   const calls = [];
   const ctx = makeCtx(calls);
-  apply(ctx, { boards: [empty], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(ctx, { boards: [empty], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length > 0), "без board.json недобор не объявлен");
   assert.equal(calls.length, 1);
   assert.ok(calls[0].content[0].text.includes("в todo 0 < 1"), calls[0].content[0].text);
@@ -312,7 +312,7 @@ await check("нет board.json — минимум 1", async () => {
   const filled = makeBoard([["111", "todo"]]);
   const quiet = [];
   const second = makeCtx(quiet);
-  apply(second, { boards: [filled], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(second, { boards: [filled], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   await sleep(300);
   assert.equal(quiet.length, 0, `нарядов ${quiet.length}, а минимум уже набран`);
   second.pick("dispose")();
@@ -322,7 +322,7 @@ await check("битый board.json — минимум 1, сторож работ
   const board = makeBoard([], "{ это не json");
   const calls = [];
   const ctx = makeCtx(calls);
-  apply(ctx, { boards: [board], roles: { dispatcher: "sess-dispatch" }, catchUpMs: 20, debounceMs: 20 });
+  apply(ctx, { boards: [board], roles: { dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" }, catchUpMs: 20, debounceMs: 20 });
   assert.ok(await waitFor(() => calls.length > 0), "с битым board.json наряд пропал");
   assert.equal(calls.length, 1);
   assert.ok(calls[0].content[0].text.includes("в todo 0 < 1"), calls[0].content[0].text);

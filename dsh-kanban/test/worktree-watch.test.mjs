@@ -50,7 +50,7 @@ async function waitFor(predicate, timeout = 3000) {
 }
 
 /** Роли, которых будит сторож. Диспетчера нет: недобор `todo` здесь не про нас. */
-const ROLES = { reviewer: "sess-reviewer", verifier: "sess-verifier" };
+const ROLES = { reviewer: "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e", verifier: "session-03d032c7-b73e-4ed5-82de-4cbb49138180" };
 
 const T1 = "2026-10-21T10:00:00Z";
 const T2 = "2026-10-21T11:00:00Z";
@@ -82,7 +82,7 @@ function writeCard(at, id, status, extra = {}) {
     `id: "${id}"`,
     `title: Задача ${id}`,
     `status: ${status}`,
-    `owner: "${extra.owner ?? "sess-worker"}"`,
+    `owner: "${extra.owner ?? "session-6af8ff46-f3e7-4640-8a2d-045543fbc030"}"`,
     `worktree: "${extra.worktree ?? ""}"`,
     `updated: "${extra.updated ?? T1}"`,
     "---",
@@ -151,7 +151,7 @@ await check("переход карточки в рабочем дереве да
   await writeUntilNoticed(() => writeCard(tree, "039", "in-review", { updated: T2, worktree: tree }), calls, "переход в рабочем дереве не объявлен");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e");
   const text = calls[0].content[0].text;
   assert.match(text, /#039/, "в наряде нет id карточки");
   assert.ok(text.includes("worktrees/039"), `в наряде нет пути рабочего дерева: ${text}`);
@@ -172,7 +172,7 @@ await check("свежая копия из рабочего дерева побе
   assert.ok(await waitFor(() => calls.length > 0), "карточка из дерева не объявлена");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e");
   assert.ok(calls[0].content[0].text.includes("worktrees/039"));
   ctx.pick("dispose")();
 });
@@ -189,7 +189,7 @@ await check("старая копия из рабочего дерева прои
   assert.ok(await waitFor(() => calls.length > 0), "свежая копия не объявлена");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer", "победила старая копия из дерева");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e", "победила старая копия из дерева");
   ctx.pick("dispose")();
 });
 
@@ -205,7 +205,7 @@ await check("при равном updated выигрывает копия из р
   assert.ok(await waitFor(() => calls.length > 0), "карточка не объявлена");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-verifier", "равенство должно решаться в пользу дерева");
+  assert.equal(calls[0].sessionId, "session-03d032c7-b73e-4ed5-82de-4cbb49138180", "равенство должно решаться в пользу дерева");
   ctx.pick("dispose")();
 });
 
@@ -221,7 +221,7 @@ await check("новое рабочее дерево подхватывается
   await writeUntilNoticed(() => writeCard(tree, "047", "in-review", { updated: T2 }), calls, "появившееся дерево не подхвачено");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e");
   assert.ok(calls[0].content[0].text.includes("worktrees/047"));
   ctx.pick("dispose")();
 });
@@ -248,7 +248,7 @@ await check("удалённое дерево не ломает обход и н�
   await writeUntilNoticed(() => writeCard(board, "039", "in-review", { updated: T2 }), calls, "основной чекаут перестал объявлять переходы");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e");
   ctx.pick("dispose")();
 });
 
@@ -327,7 +327,7 @@ await check("переход в основном чекауте по-прежне
   await writeUntilNoticed(() => writeCard(board, "048", "in-review", { updated: T2 }), calls, "переход в основной доске не объявлен");
   await sleep(150);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e");
   // Основная копия — без рабочего дерева: приписки про дерево в тексте быть не должно.
   assert.ok(!calls[0].content[0].text.includes("работай там"), "наряд из основного чекаута зовёт в дерево");
   ctx.pick("dispose")();
@@ -342,7 +342,7 @@ await check("наряд о слиянии не зовёт в рабочее де
 
   const calls = [];
   const ctx = makeCtx(calls);
-  apply(ctx, { ...config(board, { catchUpMs: 5000 }), roles: { ...ROLES, dispatcher: "sess-dispatch" } });
+  apply(ctx, { ...config(board, { catchUpMs: 5000 }), roles: { ...ROLES, dispatcher: "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85" } });
   // Фиксированная пауза до записи не годится: `fs.watch` под нагрузкой не успевает
   // встать, и переход «теряется» (флейк на загруженной машине). Пишем ту же версию
   // карточки, пока сторож не увидит: `updated` не меняется, поэтому ключ доставки
@@ -355,7 +355,7 @@ await check("наряд о слиянии не зовёт в рабочее де
   assert.ok(calls.length > 0, "наряд о слиянии не отправлен");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-dispatch");
+  assert.equal(calls[0].sessionId, "session-dca2c9fe-f0d4-43f2-855e-d62a284adf85");
   const text = calls[0].content[0].text;
   assert.ok(text.includes("bin/task-commit.sh 053"), `в наряде нет команды слияния: ${text}`);
   // `bin/task-commit.sh` из рабочего дерева задачи отказывается работать.
@@ -401,7 +401,7 @@ await check("файл с чужим id внутри дерева не припи
     'id: "042"',
     "title: Задача 042",
     "status: testing",
-    'owner: "sess-worker"',
+    'owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030"',
     `updated: "${T3}"`,
     "---",
     "",
@@ -414,7 +414,7 @@ await check("файл с чужим id внутри дерева не припи
   assert.ok(await waitFor(() => calls.length > 0), "карточка основного чекаута не объявлена");
   await sleep(200);
   assert.equal(calls.length, 1, `нарядов ${calls.length}`);
-  assert.equal(calls[0].sessionId, "sess-reviewer", "испорченная копия подменила карточку");
+  assert.equal(calls[0].sessionId, "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e", "испорченная копия подменила карточку");
   assert.ok(!calls[0].content[0].text.includes("работай там"), "испорченная копия приписала чужое дерево");
   ctx.pick("dispose")();
 });

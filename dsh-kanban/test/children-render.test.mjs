@@ -285,10 +285,10 @@ const OVERVIEW = {
       title: "aif-project",
       counts: { backlog: 1, todo: 0, "in-progress": 1, "in-review": 0, testing: 0, ready: 1, blocked: 0 },
       inProgress: [
-        { id: "003", title: "Колонки", owner: "sess-71bd0c3e-4a92", role: "worker", updated: "2026-10-30T12:00:00Z" }
+        { id: "003", title: "Колонки", owner: "session-95889d88-85cf-49bf-8b7a-ae85bae5ec57", role: "worker", updated: "2026-10-30T12:00:00Z" }
       ],
       cards: [
-        { id: "003", title: "Колонки", status: "in-progress", owner: "sess-71bd0c3e-4a92", role: "worker", updated: "2026-10-30T12:00:00Z", source: "worktree", tokens: 6000, usage: { worker: 6000 }, spec: "004", description: "Первый абзац задачи." },
+        { id: "003", title: "Колонки", status: "in-progress", owner: "session-95889d88-85cf-49bf-8b7a-ae85bae5ec57", role: "worker", updated: "2026-10-30T12:00:00Z", source: "worktree", tokens: 6000, usage: { worker: 6000 }, spec: "004", description: "Первый абзац задачи." },
         { id: "007", title: "Спека", status: "backlog", owner: "", updated: "2026-10-30T10:00:00Z" }
       ],
       problems: [],
@@ -390,7 +390,7 @@ await checkAsync("счётчики по статусам и карточки «�
   assert.ok(counts.includes("todo"), "нет счётчика todo");
   assert.deepEqual(view.attrs("data-kanban-children-inprogress"), ["003"]);
   assert.ok(text.includes("Колонки"), "нет названия карточки в работе");
-  assert.ok(/sess-71bd0c3e/.test(text), "нет владельца карточки в работе");
+  assert.ok(/session-95889d88/.test(text), `нет владельца карточки в работе: ${text.slice(0, 200)}`);
 });
 
 await checkAsync("ошибка доски — отдельной строкой, остальные доски на месте", async () => {

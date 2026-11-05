@@ -144,13 +144,13 @@ const infra = path.join(treeRoot, "aif-project", "infra");
 makeBoard(infra);
 writeCard(path.join(infra, ".kanban", "tasks"), "001", "backlog");
 writeCard(path.join(infra, ".kanban", "tasks"), "002", "todo");
-writeCard(path.join(infra, ".kanban", "tasks"), "003", "in-progress", { owner: "sess-worker", role: "worker" });
-writeCard(path.join(infra, ".kanban", "tasks"), "004", "in-review", { owner: "sess-worker" });
+writeCard(path.join(infra, ".kanban", "tasks"), "003", "in-progress", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030", role: "worker" });
+writeCard(path.join(infra, ".kanban", "tasks"), "004", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" });
 writeCard(path.join(infra, ".kanban", "tasks"), "005", "ready", { spec: "004" });
 
 // Карточка 003 живёт ещё и в рабочем дереве доски: копия свежее и она побеждает.
 writeCard(path.join(infra, "worktrees", "003", ".kanban", "tasks"), "003", "in-progress", {
-  owner: "sess-worker",
+  owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030",
   role: "worker",
   branch: "task/003",
   updated: "2026-10-30T12:00:00Z",
@@ -164,13 +164,13 @@ fs.writeFileSync(
 makeBoard(path.join(infra, "worktrees", "006", ".kanban", ".."));
 writeCard(path.join(infra, ".kanban", "tasks"), "006", "todo", { updated: "2026-10-30T14:00:00Z" });
 writeCard(path.join(infra, "worktrees", "006", ".kanban", "tasks"), "006", "in-progress", {
-  owner: "sess-tie",
+  owner: "session-b3b3478d-5966-41f2-8706-65d824b4feb7",
   updated: "2026-10-30T14:00:00Z",
 });
 
 // Вторая доска — вне дерева, абсолютным путём.
 const external = makeBoard(path.join(work, "other-project"));
-writeCard(path.join(external, ".kanban", "tasks"), "010", "testing", { owner: "sess-q" });
+writeCard(path.join(external, ".kanban", "tasks"), "010", "testing", { owner: "session-143559ab-61cf-4630-8822-5bb1a6d9dfea" });
 
 // Третья запись манифеста указывает в никуда — ошибка должна остаться её own.
 fs.mkdirSync(path.join(treeRoot, ".kanban"), { recursive: true });
@@ -222,7 +222,7 @@ check("счётчики по статусам и карточки «в рабо�
     infraBoard.inProgress.map((card) => card.id),
     ["003", "006"],
   );
-  assert.equal(infraBoard.inProgress[0].owner, "sess-worker");
+  assert.equal(infraBoard.inProgress[0].owner, "session-6af8ff46-f3e7-4640-8a2d-045543fbc030");
   assert.equal(infraBoard.inProgress[0].role, "worker");
   assert.ok(infraBoard.inProgress[0].updated);
 });
@@ -235,7 +235,7 @@ check("копия из рабочего дерева побеждает по с�
   assert.equal(three.worktree, "worktrees/003");
   assert.equal(three.branch, "task/003");
   assert.equal(six.source, "worktree", "при равном updated побеждает дерево");
-  assert.equal(six.owner, "sess-tie");
+  assert.equal(six.owner, "session-b3b3478d-5966-41f2-8706-65d824b4feb7");
 });
 
 check("файл с чужим id в рабочем дереве не приписан к доске", () => {

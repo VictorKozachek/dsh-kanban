@@ -65,6 +65,49 @@ import {
 } from "./card-actions.js";
 import { registerChildrenService } from "./children.js";
 import { registerRolePresets } from "./presets.js";
+import { isSessionId, pickBoardRoot } from "./watcher-core.js";
+
+// ---------------------------------------------------------------------------
+// Диагностика сторожа (issue #2): что видит host-половина и почему не доставляет
+// наряды. Пишется в один файл вне досок (по умолчанию /tmp), поэтому не влияет
+// ни на доски, ни на тесты набора; путь можно переопределить
+// `DSH_KANBAN_DIAG_PATH`. Никогда не бросает: диагностика не может уронить сторож.
+// ---------------------------------------------------------------------------
+const DIAG_PATH = process.env.DSH_KANBAN_DIAG_PATH || "/tmp/dsh-kanban-watch.diag.json";
+const diagState = {
+  pid: process.pid,
+  startedAt: new Date().toISOString(),
+  applyCount: 0,
+  config: null,
+  watched: [],
+  boards: [],
+  events: [],
+  fatal: null,
+};
+function diagWrite() {
+  try {
+    fs.writeFileSync(DIAG_PATH, JSON.stringify(diagState));
+  } catch {
+    /* диагностика не должна влиять на работу */
+  }
+}
+function diag(patch) {
+  try {
+    Object.assign(diagState, patch);
+    diagWrite();
+  } catch {
+    /* игнорируем */
+  }
+}
+function diagEvent(entry) {
+  try {
+    diagState.events.push({ t: Date.now(), ...entry });
+    if (diagState.events.length > 120) diagState.events.shift();
+    diagWrite();
+  } catch {
+    /* игнорируем */
+  }
+}
 
 /**
  * Сервисы, без которых плагин не стартует: `sessionController` — доставка нарядов
@@ -158,7 +201,7 @@ function mainTasksDir(root) {
  *   читать все).
  */
 /** Каталоги, которые обход `roots` не трогает: там доска не живёт. */
-const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "build", "templates", "target"]);
+const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "build", "templates", "target", "worktrees", ".worktrees"]);
 
 /**
  * Найти все доски под корнем: каталоги, где есть `.kanban/tasks`.
@@ -427,6 +470,8 @@ function roleOfPreset(agentPreset) {
  * @param config - `{ boards, roles }` из строки плагина.
  */
 export function apply(ctx, config = {}) {
+  diagState.applyCount += 1;
+  diag({ config: { boards: config?.boards ?? null, roots: config?.roots ?? null }, events: [], boards: [] });
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
@@ -443,14 +488,9 @@ export function apply(ctx, config = {}) {
     /** Корни наблюдаемых досок: наряд и роль не должны пересекать эту границу. */
     const boardRoots = () => watchedBoards();
     /** Корень доски, внутри которого лежит каталог; null — вне наблюдаемых досок. */
-    const boardRootOf = (cwd) => {
-      if (typeof cwd !== "string" || cwd === "") return null;
-      const target = path.resolve(cwd);
-      for (const root of boardRoots()) {
-        if (target === root || target.startsWith(root + path.sep)) return root;
-      }
-      return null;
-    };
+    // Самый глубокий подходит лучше любого родительского: доски бывают
+    // вложенными, иначе наряды дочерних досок теряются (issue #2).
+    const boardRootOf = (cwd) => pickBoardRoot(boardRoots(), cwd);
 
     /**
      * Состояние жизни плагина. `disposed` — единый флаг: выставляется в начале
@@ -632,7 +672,9 @@ export function apply(ctx, config = {}) {
       }
     }, catchUpMs);
 
+    diag({ watched: watchedBoards() });
     if (boards.length === 0 && roots.length === 0) {
+      diag({ fatal: "в конфиге плагина нет boards и roots" });
       log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards и roots");
       return;
     }
@@ -648,12 +690,36 @@ export function apply(ctx, config = {}) {
      * отменяются — `sessionController.prompt` получает aborted-сигнал, и сессия
      * снимает сообщение из очереди. После dispose новые доставки не стартуют.
      */
+    /**
+     * Существует ли сессия: `true`/`false` или `null`, если проверить нельзя.
+     * Нужно, чтобы снимать из pending наряды для удалённых/архивных сессий.
+     */
+    const sessionExists = async (sessionId) => {
+      const query = ctx.get?.("sessionQuery");
+      if (!query || typeof query.observeSession !== "function") return null;
+      let lease;
+      try {
+        lease = await query.observeSession(sessionId, { projectionMode: "none" });
+        return true;
+      } catch (error) {
+        const text = `${error?.code ?? ""} ${error?.message ?? error}`;
+        if (/not.?found|NOT_FOUND/i.test(text)) return false;
+        return null;
+      } finally {
+        try {
+          lease?.[Symbol.dispose]?.call(lease);
+        } catch {
+          /* release не должен ломать проверку */
+        }
+      }
+    };
+
     const deliver = async (item) => {
-      if (disposed) return false;
+      if (disposed) return { ok: false, permanent: false };
       const service = ctx.sessionController;
       if (!service || typeof service.prompt !== "function") {
         log(ctx, "warn", "нет сервиса sessionController — наряд не отправлен");
-        return false;
+        return { ok: false, permanent: false };
       }
       const controller = new AbortController();
       controllers.add(controller);
@@ -667,16 +733,22 @@ export function apply(ctx, config = {}) {
           },
           controller.signal,
         );
-        if (disposed) return false;
+        if (disposed) return { ok: false, permanent: false };
         log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) → ${item.sessionId}`);
-        return true;
+        return { ok: true, permanent: false };
       } catch (error) {
         if (controller.signal.aborted || disposed) {
           log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) отменён: плагин выгружается`);
-          return false;
+          return { ok: false, permanent: false };
         }
+        // Сессия-получатель может быть недоступна навсегда (удалена, архивная,
+        // принадлежит subagent-роутингу): повторять такой наряд бессмысленно,
+        // иначе он навсегда оседает в `.watcher-pending.json` (issue #2).
+        const text = `${error?.code ?? ""} ${error?.message ?? error}`;
+        const permanent = /subagent\/|session\/not-found|not found|agent-preset\/locked/i.test(text);
+        diagEvent({ step: "prompt-failed", permanent, card: item.cardId ?? null, session: item.sessionId ?? null, error: String(error?.stack ?? error?.message ?? error) });
         log(ctx, "warn", `наряд по #${item.cardId} не доставлен (${item.sessionId}): ${error?.message ?? error}`);
-        return false;
+        return { ok: false, permanent };
       } finally {
         controllers.delete(controller);
       }
@@ -691,6 +763,7 @@ export function apply(ctx, config = {}) {
       // оркестратор, а файл дешёвый.
       const boardFile = path.join(root, ".kanban", "board.json");
       let previous = readSnapshot(root);
+      diagEvent({ board: root, step: "board-start", tasksDir, previous: previous === null ? null : previous.size });
       if (previous === null) {
         log(ctx, "warn", `нет каталога карточек: ${tasksDir}`);
         continue;
@@ -718,6 +791,7 @@ export function apply(ctx, config = {}) {
       const deliverOnce = (key, item) => {
         if (disposed) return;
         if (state[key] || inFlight.has(key)) return;
+        diagEvent({ board: root, step: "deliver-once", key, card: item.cardId ?? null, session: item.sessionId ?? null });
         inFlight.add(key);
         void (async () => {
           try {
@@ -729,14 +803,27 @@ export function apply(ctx, config = {}) {
               cwd = null;
             }
             if (disposed) return;
+            diagEvent({ board: root, step: "deliver-cwd", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
             if (cwd !== null && boardRootOf(cwd) !== path.resolve(root)) {
+              diagEvent({ board: root, step: "deliver-skipped-board", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
               log(ctx, "warn", `наряд по #${item.cardId} пропущен: сессия ${item.sessionId} вне доски ${root}`);
               return;
             }
-            const accepted = await deliver(item).catch(() => false);
+            const result = await deliver(item).catch(() => ({ ok: false, permanent: false }));
+            const accepted = result.ok === true;
             // По dispose состояние на диске не трогаем: стартовый обход следующего
             // запуска объявит всё, что ещё ждёт роль, — потерять наряд нечего.
             if (disposed) return;
+            diagEvent({ board: root, step: accepted ? "delivered" : "deliver-failed", permanent: result.permanent === true, key, card: item.cardId ?? null, session: item.sessionId ?? null });
+            if (!accepted && result.permanent === true) {
+              // Получатель недоступен навсегда: не копим pending, но и не молчим.
+              diagEvent({ board: root, step: "deliver-permanent-failed", key, card: item.cardId ?? null, session: item.sessionId ?? null });
+              if (pending[key]) {
+                delete pending[key];
+                saveState(pendingFile, pending);
+              }
+              return;
+            }
             if (!accepted) {
               // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
               // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
@@ -806,6 +893,7 @@ export function apply(ctx, config = {}) {
         try {
           notices = planNotices(before, next, { ...boardRoles, board: root });
         } catch (error) {
+          diagEvent({ board: root, step: "plan-transitions-failed", error: String(error?.message ?? error) });
           log(ctx, "warn", `не разобрал переходы доски: ${error?.message ?? error}`);
           return;
         }
@@ -814,9 +902,24 @@ export function apply(ctx, config = {}) {
         try {
           notices = notices.concat(planAssignmentNotices(before, next, { board: root }));
         } catch (error) {
+          diagEvent({ board: root, step: "plan-assignments-failed", error: String(error?.message ?? error) });
           log(ctx, "warn", `не разобрал асайны доски: ${error?.message ?? error}`);
         }
+        diagEvent({
+          board: root,
+          step: "announce",
+          before: before.size,
+          next: next.size,
+          notices: notices.map((item) => ({ key: item.key ?? null, kind: item.kind ?? null, card: item.cardId ?? null, session: item.sessionId ?? null })),
+        });
         for (const item of notices) {
+          // Владелец обязан быть id сессии: человекочитаемая метка в `owner`
+          // (старый формат) иначе уходит в prompt и навсегда оседает в pending.
+          if (!isSessionId(item.sessionId)) {
+            diagEvent({ board: root, step: "notice-invalid-owner", kind: item.kind ?? null, card: item.cardId ?? null, session: item.sessionId ?? null });
+            log(ctx, "warn", `наряд по #${item.cardId} пропущен: владелец «${item.sessionId ?? ""}» не похож на id сессии`);
+            continue;
+          }
           // У асайна свой ключ: он учитывает владельца, иначе перепривязка в `todo`
           // осталась бы без наряда.
           const key = item.key ?? deliveryKey(next.get(item.cardId), item.status);
@@ -830,8 +933,23 @@ export function apply(ctx, config = {}) {
 
       // 1. Что уже ждёт роль: карточка могла зависнуть в in-review/testing/ready
       //    до запуска сторожа. Повторов не будет — их гасит файл состояния.
-      const startPass = setTimeout(() => {
+      const startPass = setTimeout(async () => {
         timers.delete(startPass);
+        diagEvent({ board: root, step: "start-pass", pending: Object.keys(pending).length });
+        if (disposed) return;
+        // Ссылки на удалённые/архивные сессии не должны вечно жить в pending:
+        // наряд для них повторить невозможно, а файл из-за них растёт.
+        for (const [key, item] of Object.entries(pending)) {
+          if (disposed) return;
+          if (pending[key] !== item) continue;
+          const exists = await sessionExists(item.sessionId);
+          if (exists === false) {
+            delete pending[key];
+            saveState(pendingFile, pending);
+            diagEvent({ board: root, step: "pending-dropped-dead-session", key, session: item.sessionId });
+            log(ctx, "warn", `pending по #${item.cardId} снят: сессия ${item.sessionId} больше не существует`);
+          }
+        }
         if (disposed) return;
         try {
           announce(new Map(), previous);
@@ -842,6 +960,13 @@ export function apply(ctx, config = {}) {
         // же deliverOnce: если объявление выше уже взяло наряд в работу, повтор
         // не отправит второе сообщение.
         for (const [key, item] of Object.entries(pending)) {
+          if (!isSessionId(item.sessionId)) {
+            diagEvent({ board: root, step: "pending-dropped-invalid-owner", key, session: item.sessionId ?? null });
+            log(ctx, "warn", `pending по #${item.cardId} снят: владелец «${item.sessionId ?? ""}» не id сессии`);
+            delete pending[key];
+            saveState(pendingFile, pending);
+            continue;
+          }
           const card = previous.get(item.cardId);
           // След мог устареть: карточка уехала дальше или её уже нет на доске.
           // Такой наряд отправлять нечего — молча снимаем, иначе он висел бы в
@@ -874,6 +999,7 @@ export function apply(ctx, config = {}) {
         timer = null;
         if (disposed) return;
         const next = readSnapshot(root);
+        diagEvent({ board: root, step: "tick", next: next === null ? null : next.size });
         if (next === null) return;
         const before = previous;
         previous = next;
@@ -916,7 +1042,9 @@ export function apply(ctx, config = {}) {
             const watcher = fs.watch(dir, onEvent);
             watched.set(dir, watcher);
             watchers.push(watcher);
+            diagEvent({ board: root, step: "watch-ok", dir });
           } catch (error) {
+            diagEvent({ board: root, step: "watch-failed", dir, error: String(error?.message ?? error) });
             log(ctx, "warn", `не слежу за ${dir}: ${error?.message ?? error}`);
           }
         }
@@ -995,8 +1123,10 @@ export function apply(ctx, config = {}) {
       }
     });
 
+    diag({ applied: { at: new Date().toISOString(), watchers: watchers.length, boards: watchedBoards().length } });
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${[...rolesByRoot.values()].reduce((n, item) => n + Object.keys(item).length, 0)}`);
   } catch (error) {
+    diag({ fatal: String(error?.stack ?? error?.message ?? error) });
     log(ctx, "warn", `сторож доски не запустился: ${error?.message ?? error}`);
   }
 }

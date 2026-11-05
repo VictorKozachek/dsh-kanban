@@ -516,8 +516,8 @@ assert.match(failed.text, /workspace-file\/outside-workspace/);
 
 const moveCards = {
   ".kanban/tasks/100.md": "---\nid: 100\ntitle: Черновик в бэклоге\nstatus: backlog\nowner: \"\"\nupdated: 2026-10-22T10:00:00Z\n---\n",
-  ".kanban/tasks/101.md": "---\nid: 101\ntitle: Ждёт в очереди\nstatus: todo\nowner: session-abc\nrole: worker\nupdated: 2026-10-22T10:00:00Z\n---\n",
-  ".kanban/tasks/102.md": "---\nid: 102\ntitle: Уже в работе\nstatus: in-progress\nowner: session-abc\nrole: worker\nupdated: 2026-10-22T10:00:00Z\n---\n",
+  ".kanban/tasks/101.md": "---\nid: 101\ntitle: Ждёт в очереди\nstatus: todo\nowner: session-df98a854-4084-4ba1-8fbc-f00faea193bf\nrole: worker\nupdated: 2026-10-22T10:00:00Z\n---\n",
+  ".kanban/tasks/102.md": "---\nid: 102\ntitle: Уже в работе\nstatus: in-progress\nowner: session-df98a854-4084-4ba1-8fbc-f00faea193bf\nrole: worker\nupdated: 2026-10-22T10:00:00Z\n---\n",
   ".kanban/tasks/103.md": "---\nid: 103\ntitle: Слитая задача\nstatus: merged\nowner: \"\"\nupdated: 2026-10-22T10:00:00Z\n---\n"
 };
 

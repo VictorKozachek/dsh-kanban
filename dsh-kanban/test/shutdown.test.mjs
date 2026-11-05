@@ -170,12 +170,12 @@ async function measureDispose(cycle) {
   for (let index = 0; index < 30; index += 1) {
     const board = path.join(root, `board-${String(index).padStart(2, "0")}`);
     fs.mkdirSync(path.join(board, ".kanban", "tasks"), { recursive: true });
-    writeCard(board, "001", "in-progress", { owner: "sess-worker" });
-    writeCard(board, "002", "in-review", { owner: "sess-worker" });
+    writeCard(board, "001", "in-progress", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" });
+    writeCard(board, "002", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" });
     boards.push(board);
   }
   const { ctx } = makeCtx({ sessionCwd: boards[0] });
-  apply(ctx, { boards, roles: { reviewer: "sess-reviewer" }, catchUpMs: 40, debounceMs: 10 });
+  apply(ctx, { boards, roles: { reviewer: "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e" }, catchUpMs: 40, debounceMs: 10 });
   assert.ok(activeWatchers().length > 0, "сторож не поднял наблюдение — стенд не проверяет dispose");
   assert.ok(
     ctx.effects.some((effect) => typeof effect.dispose === "function"),
@@ -214,16 +214,16 @@ await check("30 досок: dispose закрывает все FSWatcher, сни�
 });
 
 await check("событие файловой системы после dispose не поднимает watcher и не пишет state", async () => {
-  const board = makeBoard("events", [["002", "in-review", { owner: "sess-worker" }]]);
+  const board = makeBoard("events", [["002", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const { ctx, prompts } = makeCtx({ sessionCwd: board });
-  apply(ctx, { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 20, debounceMs: 10 });
+  apply(ctx, { boards: [board], roles: { reviewer: "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e" }, catchUpMs: 20, debounceMs: 10 });
   assert.ok(await waitFor(() => fs.existsSync(stateFile(board))), "стартовый обход не записал state");
   const before = fs.readFileSync(stateFile(board), "utf8");
   const promptsBefore = prompts.length;
   unload(ctx);
   assert.ok(await waitFor(() => activeWatchers().length === 0, 5000), "наблюдатель не закрылся");
   // Событие после dispose: карточка появляется, каталог «меняется».
-  writeCard(board, "003", "in-review", { owner: "sess-worker" });
+  writeCard(board, "003", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" });
   await sleep(150);
   assert.equal(activeWatchers().length, 0, "watch не должен подниматься заново");
   assert.equal(fs.readFileSync(stateFile(board), "utf8"), before, "state изменился после dispose");
@@ -231,7 +231,7 @@ await check("событие файловой системы после dispose �
 });
 
 await check("повторный dispose безопасен и снимает службу канала", async () => {
-  const board = makeBoard("repeat", [["001", "in-progress", { owner: "sess-worker" }]]);
+  const board = makeBoard("repeat", [["001", "in-progress", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const { ctx, services } = makeCtx({ sessionCwd: board });
   apply(ctx, { boards: [board], catchUpMs: 10 });
   assert.ok(ctx.get(SERVICE_KEY), "служба канала не зарегистрирована");
@@ -249,7 +249,7 @@ await check("повторный dispose безопасен и снимает с�
 console.log("== dispose: in-flight наряды отменяются");
 
 await check("in-flight prompt получает abort, новых доставок и записей после dispose нет", async () => {
-  const board = makeBoard("inflight", [["002", "in-review", { owner: "sess-worker" }]]);
+  const board = makeBoard("inflight", [["002", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   let capturedSignal = null;
   const prompt = (_request, signal) =>
     new Promise((_resolve, reject) => {
@@ -261,7 +261,7 @@ await check("in-flight prompt получает abort, новых доставо�
       });
     });
   const { ctx, prompts } = makeCtx({ sessionCwd: board, prompt });
-  apply(ctx, { boards: [board], roles: { reviewer: "sess-reviewer" }, catchUpMs: 20, debounceMs: 10 });
+  apply(ctx, { boards: [board], roles: { reviewer: "session-8cce3644-b81e-4783-8ee2-04d8c0d0569e" }, catchUpMs: 20, debounceMs: 10 });
   assert.ok(await waitFor(() => capturedSignal !== null), "доставка не началась");
   assert.equal(capturedSignal.aborted, false, "сигнал не должен быть отменён до dispose");
   unload(ctx);
@@ -289,7 +289,7 @@ await check("дочерний bin/task-assign.sh отменяется по dispo
   apply(ctx, { boards: [root], catchUpMs: 5 });
   const service = ctx.get(SERVICE_KEY);
   assert.ok(service, "служба канала не зарегистрирована");
-  const pending = service.assign({ sessionId: "session-abc", cardId: "001" });
+  const pending = service.assign({ sessionId: "session-df98a854-4084-4ba1-8fbc-f00faea193bf", cardId: "001" });
   let outcome = null;
   pending.then((value) => {
     outcome = value;
