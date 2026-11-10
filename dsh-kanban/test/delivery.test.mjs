@@ -97,6 +97,18 @@ function stateKeys(board) {
   return Object.keys(JSON.parse(fs.readFileSync(file, "utf8")));
 }
 
+await check("наряд для subagent-owned сессии не остаётся в pending", async () => {
+  const board = makeBoard([["010", "testing", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls, "is owned by subagent routing");
+  apply(ctx, { boards: [board], roles: { verifier: "session-1a7e1a7e-0000-4000-8000-000000000001" }, catchUpMs: 20, debounceMs: 10 });
+  await sleep(400);
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  const pending = fs.existsSync(pendingFile) ? JSON.parse(fs.readFileSync(pendingFile, "utf8")) : {};
+  assert.deepEqual(Object.keys(pending), [], "permanent-ошибка осталась в pending: " + JSON.stringify(pending));
+  ctx.pick("dispose")();
+});
+
 console.log("== доставка наряда (поддельный сервис сессий)");
 
 await check("стартовый обход объявляет карточку, которая уже ждёт роль", async () => {

@@ -745,7 +745,7 @@ export function apply(ctx, config = {}) {
         // принадлежит subagent-роутингу): повторять такой наряд бессмысленно,
         // иначе он навсегда оседает в `.watcher-pending.json` (issue #2).
         const text = `${error?.code ?? ""} ${error?.message ?? error}`;
-        const permanent = /subagent\/|session\/not-found|not found|agent-preset\/locked/i.test(text);
+        const permanent = /subagent|session\/not-found|not found|agent-preset\/locked/i.test(text);
         diagEvent({ step: "prompt-failed", permanent, card: item.cardId ?? null, session: item.sessionId ?? null, error: String(error?.stack ?? error?.message ?? error) });
         log(ctx, "warn", `наряд по #${item.cardId} не доставлен (${item.sessionId}): ${error?.message ?? error}`);
         return { ok: false, permanent };
