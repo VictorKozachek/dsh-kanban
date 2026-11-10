@@ -78,6 +78,7 @@ const diagState = {
   pid: process.pid,
   startedAt: new Date().toISOString(),
   applyCount: 0,
+  applies: [],
   config: null,
   watched: [],
   boards: [],
@@ -471,6 +472,9 @@ function roleOfPreset(agentPreset) {
  */
 export function apply(ctx, config = {}) {
   diagState.applyCount += 1;
+  const applyRecord = { at: new Date().toISOString(), apply: diagState.applyCount, error: null };
+  diagState.applies.push(applyRecord);
+  if (diagState.applies.length > 10) diagState.applies.shift();
   diag({ config: { boards: config?.boards ?? null, roots: config?.roots ?? null }, events: [], boards: [] });
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
@@ -1123,10 +1127,13 @@ export function apply(ctx, config = {}) {
       }
     });
 
+    applyRecord.boards = watchedBoards().length;
+    applyRecord.watchers = watchers.length;
     diag({ applied: { at: new Date().toISOString(), watchers: watchers.length, boards: watchedBoards().length } });
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${[...rolesByRoot.values()].reduce((n, item) => n + Object.keys(item).length, 0)}`);
   } catch (error) {
-    diag({ fatal: String(error?.stack ?? error?.message ?? error) });
+    applyRecord.error = String(error?.stack ?? error?.message ?? error);
+    diag({ fatal: applyRecord.error });
     log(ctx, "warn", `сторож доски не запустился: ${error?.message ?? error}`);
   }
 }
