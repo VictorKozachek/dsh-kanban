@@ -12,12 +12,24 @@
     -webkit-font-smoothing: antialiased;
   }
   .app { display: flex; height: 100vh; }
-  .left { width: 236px; flex: 0 0 auto; background: #1c1e23; border-right: 1px solid rgba(255,255,255,.09); padding: 10px 8px; }
-  .brand { font-weight: 600; font-size: 12px; letter-spacing: .02em; padding: 6px 8px 10px; opacity: .9; }
-  .ws { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .45; padding: 10px 8px 4px; }
-  .row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; }
-  .row.active { background: #212429; }
-  .row .meta { margin-left: auto; font-size: 10.5px; opacity: .5; }
+  .left { width: 236px; flex: 0 0 auto; background: #1c1e23; border-right: 1px solid rgba(255,255,255,.09); padding: 8px 8px; display: flex; flex-direction: column; }
+  .brandRow { display: flex; align-items: center; gap: 6px; padding: 6px 8px 10px; }
+  .logo { width: 13px; height: 13px; border-radius: 50%; background: #e6e8eb; opacity: .9; }
+  .brandName { font-weight: 600; font-size: 12.5px; letter-spacing: .01em; }
+  .brandTag { font-size: 8px; letter-spacing: .09em; border: 1px solid rgba(255,255,255,.09); border-radius: 3px; padding: 1px 4px; opacity: .65; }
+  .newSession { margin: 0 4px 8px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 8px; background: #212429; font-size: 12px; text-align: center; opacity: .95; }
+  .menuItem { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; opacity: .88; }
+  .miIcon { width: 14px; font-size: 11px; opacity: .55; text-align: center; }
+  .wsHead { display: flex; align-items: center; gap: 6px; padding: 12px 8px 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .45; }
+  .wsIcons { margin-left: auto; font-size: 10px; opacity: .8; letter-spacing: 3px; }
+  .treeWs { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; opacity: .95; }
+  .chev { width: 10px; font-size: 9px; opacity: .6; }
+  .folder { font-size: 11px; opacity: .6; }
+  .treeSession { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 30px; font-size: 12px; border-radius: 7px; opacity: .85; }
+  .treeSession.active { background: #212429; }
+  .tnDot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+  .tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .time { margin-left: auto; font-size: 10px; opacity: .5; }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
   .conv { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid rgba(255,255,255,.09); }
   .convHead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.09); font-size: 12.5px; }
@@ -42,16 +54,20 @@
 
   <div class="app">
     <aside class="left">
-      <div class="brand">DeepSeek Harness</div>
-      <div class="ws">Проекты</div>
-      <div class="row active"><span class="dot" style="background:#22c55e"></span>demo-project<span class="meta">2</span></div>
-      <div class="row"><span class="dot" style="background:#3b82f6"></span>demo-t002<span class="meta">1</span></div>
-      <div class="row"><span class="dot" style="background:#3b82f6"></span>demo-t003<span class="meta">1</span></div>
-      <div class="ws">Сессии · demo-project</div>
-      <div class="row active"><span class="dot" style="background:#f59e0b"></span>Диспетчер<span class="meta">dispatcher</span></div>
-      <div class="row"><span class="dot" style="background:#0ea5e9"></span>Исполнитель<span class="meta">worker</span></div>
-      <div class="row"><span class="dot" style="background:#8b5cf6"></span>Ревьювер<span class="meta">reviewer</span></div>
-      <div class="row"><span class="dot" style="background:#94a3b8"></span>Верификатор<span class="meta">verifier</span></div>
+      <div class="brandRow"><span class="logo"></span><span class="brandName">DeepSeek</span><span class="brandTag">HARNESS</span></div>
+      <div class="newSession">✦&nbsp; New Session</div>
+      <div class="menuItem"><span class="miIcon">⧉</span>Plugins</div>
+      <div class="menuItem"><span class="miIcon">◷</span>Automation tasks</div>
+      <div class="menuItem"><span class="miIcon">⊞</span>More</div>
+      <div class="wsHead"><span>Workspaces</span><span class="wsIcons">⌕ ⑂ ＋</span></div>
+      <div class="treeWs"><span class="chev">▾</span><span class="folder">▸</span>demo-project</div>
+      <div class="treeSession active"><span class="tnDot" style="background:#f59e0b"></span><span class="tname">Оркестратор</span><span class="time">6min</span></div>
+      <div class="treeSession"><span class="tnDot" style="background:#0ea5e9"></span><span class="tname">Исполнитель</span><span class="time">5min</span></div>
+      <div class="treeSession"><span class="tnDot" style="background:#8b5cf6"></span><span class="tname">Ревьювер</span><span class="time">17h</span></div>
+      <div class="treeSession"><span class="tnDot" style="background:#94a3b8"></span><span class="tname">Тестировщик</span><span class="time">17h</span></div>
+      <div class="treeWs"><span class="chev">▾</span><span class="folder">▸</span>demo-agents</div>
+      <div class="treeSession"><span class="tnDot" style="background:#22c55e"></span><span class="tname">Исполнитель агентов</span><span class="time">1d</span></div>
+      <div class="treeSession"><span class="tnDot" style="background:#94a3b8"></span><span class="tname">Ревьювер агентов</span><span class="time">1d</span></div>
     </aside>
     <main class="conv">
       <div class="convHead">

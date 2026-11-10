@@ -6,9 +6,9 @@
 
 ![The board in the right sidebar: workspaces, role sessions, chat and the Kanban tab](dsh-kanban/docs/board-mockup-panel-dark.png)
 
-*One workspace, four role sessions and the board in the right sidebar. The screenshots are
-rendered by the plugin's own mockup generator from its real style table, so the layout and
-colors are the ones you get in the app.*
+*One workspace, four role sessions and the board in the right sidebar. Most screenshots are
+rendered by the plugin's own mockup generator from its real style table (so layout and colors
+match the app); images marked "real screenshot" are actual UI captures.*
 
 ## Why this plugin exists
 
@@ -75,9 +75,17 @@ inside it:
 | Reviewer | `reviewer` | reads the diff: approves to testing, or returns the card with comments |
 | Tester | `verifier` | runs tests and the manual scenario: approves to ready, or returns the card with a reproduction |
 
-![Workspace and role sessions with their presets](dsh-kanban/docs/readme-sessions-dark.png)
+![Workspace tree with role sessions](dsh-kanban/docs/readme-sessions-dark.png)
 
 *Light theme: [workspace and sessions](dsh-kanban/docs/readme-sessions-light.png).*
+
+The sidebar can group workspaces as a **tree** (the layout in the screenshot above): sessions live
+under their workspace, and workspaces may be nested as sub-projects. Role presets are not shown in
+the sidebar rows — the preset is visible in the session header and is listed in the table above.
+
+![Real sidebar: workspace tree and sessions](dsh-kanban/docs/real-sidebar.png)
+
+*A real screenshot of the sidebar (no mockup): Workspaces tree with sessions of different roles.*
 
 The flow of one task:
 

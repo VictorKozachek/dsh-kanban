@@ -513,32 +513,57 @@ def build_frame(board, board_w, board_h, view, theme):
     # левый сайдбар
     canvas.rect(0, 0, left_w, height, fill=panel)
     canvas.line(left_w, 0, left_w, height, line, 1)
-    canvas.text(12, 16, "DeepSeek Harness", f12, text)
-    canvas.text(12, 52, "ПРОЕКТЫ", f10, composite(text, 0.4, panel))
-    rows = [("demo-project", "#22c55e", "2", True), ("demo-t002", "#3b82f6", "1", False), ("demo-t003", "#3b82f6", "1", False)]
-    y = 72
-    for name, color, badge, active in rows:
-        if active:
-            canvas.rect(8, y - 3, left_w - 16, 26, radius=7, fill=panel2)
-        canvas.rect(16, y + 5, 7, 7, radius=4, fill=hex_rgb(color))
-        canvas.text(31, y, name, f12, text)
-        canvas.text(left_w - 16, y + 1, badge, f10, composite(text, 0.5, panel), anchor="ra")
-        y += 28
-    canvas.text(12, y + 16, "СЕССИИ · DEMO", f10, composite(text, 0.4, panel))
-    y += 36
-    for name, color, badge, active in [
-        ("Диспетчер", "#f59e0b", "dispatcher", True),
-        ("Исполнитель", "#0ea5e9", "worker", False),
-        ("Ревьювер", "#8b5cf6", "reviewer", False),
-        ("Верификатор", "#94a3b8", "verifier", False),
-    ]:
-        if active:
-            canvas.rect(8, y - 3, left_w - 16, 26, radius=7, fill=panel2)
-        canvas.rect(16, y + 5, 7, 7, radius=4, fill=hex_rgb(color))
-        canvas.text(31, y, name, f12, text)
-        if badge:
-            canvas.text(left_w - 16, y + 1, badge, f10, composite(text, 0.5, panel), anchor="ra")
-        y += 28
+    # логотип и название
+    canvas.rect(14, 16, 13, 13, radius=7, fill=composite(text, 0.9, panel))
+    canvas.text(33, 11, "DeepSeek", f12, text)
+    canvas.rect(96, 13, 47, 14, radius=3, outline=line, line=1)
+    canvas.text(119, 15, "HARNESS", font(8), composite(text, 0.65, panel), anchor="ma")
+
+    # New Session
+    canvas.rect(8, 38, left_w - 16, 30, radius=8, fill=panel2, outline=line, line=1)
+    canvas.text(left_w / 2, 45, "✦  New Session", f12, composite(text, 0.92, panel), anchor="ma")
+
+    # меню
+    y = 80
+    for icon, name in [("⧉", "Plugins"), ("◷", "Automation tasks"), ("⊞", "More")]:
+        canvas.text(16, y + 2, icon, font(11), composite(text, 0.55, panel))
+        canvas.text(34, y, name, f12, composite(text, 0.88, panel))
+        y += 26
+
+    # Workspaces + дерево
+    y += 8
+    canvas.text(12, y, "WORKSPACES", f10, composite(text, 0.45, panel))
+    canvas.text(left_w - 16, y + 1, "⌕ ⑂ ＋", font(10), composite(text, 0.6, panel), anchor="ra")
+    y += 22
+
+    def tree_workspace(name):
+        nonlocal_holder = None
+        return name
+
+    rows = [
+        ("ws", "demo-project"),
+        ("s", "#f59e0b", "Оркестратор", "6min", True),
+        ("s", "#0ea5e9", "Исполнитель", "5min", False),
+        ("s", "#8b5cf6", "Ревьювер", "17h", False),
+        ("s", "#94a3b8", "Тестировщик", "17h", False),
+        ("ws", "demo-agents"),
+        ("s", "#22c55e", "Исполнитель агентов", "1d", False),
+        ("s", "#94a3b8", "Ревьювер агентов", "1d", False),
+    ]
+    for row in rows:
+        if row[0] == "ws":
+            canvas.text(14, y + 2, "▾", font(9), composite(text, 0.6, panel))
+            canvas.rect(26, y + 6, 9, 7, radius=1, outline=composite(text, 0.55, panel), line=1)
+            canvas.text(42, y, row[1], f12, text)
+            y += 26
+        else:
+            _, color, name, rel, active = row
+            if active:
+                canvas.rect(8, y - 3, left_w - 16, 24, radius=7, fill=panel2)
+            canvas.rect(30, y + 6, 7, 7, radius=4, fill=hex_rgb(color))
+            canvas.text(44, y, name, f12, composite(text, 0.86, panel))
+            canvas.text(left_w - 16, y + 1, rel, f10, composite(text, 0.5, panel), anchor="ra")
+            y += 24
 
     # разговор
     cx = left_w

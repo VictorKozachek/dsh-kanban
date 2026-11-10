@@ -74,7 +74,8 @@
 | `dsh-kanban/docs/build-mockup.mjs`, `dsh-kanban/docs/dump-styles.mjs`, `dsh-kanban/docs/render-mockup.py` | Генераторы макета: HTML и PNG из стилей плагина |
 
 | `README.md`, `README.ru.md` | Пользовательская документация: зачем плагин, пример с одним воркспейсом и четырьмя сессиями ролей, установка и создание сессий (EN / RU) |
-| `dsh-kanban/docs/readme-sessions-*.png` | Кадры сайдбара с воркспейсом и сессиями ролей для README (нарезаны из макета, тёмная и светлая тема) |
+| `dsh-kanban/docs/readme-sessions-*.png` | Кадры сайдбара с деревом воркспейсов и сессиями ролей для README (нарезаны из макета, тёмная и светлая тема) |
+| `dsh-kanban/docs/real-sidebar.png` | Реальный скриншот сайдбара приложения (дерево Workspaces), вставлен в README |
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
 > `bin/`, `dsh-kanban/` в любой проект.
 
