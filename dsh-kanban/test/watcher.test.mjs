@@ -246,7 +246,10 @@ await check("ignore: путь и его потомки исключаются", 
 });
 
 await check("ignore: шаблоны * и **", async () => {
+  // `**/tmp` обязан матчить и прямой дочерний tmp, и любой вложенный.
+  assert.equal(isIgnoredPath("/proj/a/tmp", ["/proj/a/**/tmp"]), true);
   assert.equal(isIgnoredPath("/proj/a/mcp/bank/tmp/wt-1", ["/proj/a/**/tmp"]), true);
+  assert.equal(isIgnoredPath("/proj/a/tmp-other", ["/proj/a/**/tmp"]), false);
   assert.equal(isIgnoredPath("/proj/a/tmp", ["/proj/a/*/tmp"]), false);
   assert.equal(isIgnoredPath("/proj/a/x/tmp", ["/proj/a/*/tmp"]), true);
   assert.equal(isIgnoredPath("/proj/a/x/tmp/y", ["/proj/a/x/tmp/*"]), true);

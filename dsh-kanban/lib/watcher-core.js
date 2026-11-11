@@ -47,17 +47,37 @@ export function pickBoardRoot(roots, cwd) {
  */
 export function isIgnoredPath(target, patterns = []) {
   const value = path.resolve(String(target));
-  const esc = (part) => part.replace(/[.+^${}()|[\]\\?]/g, "\\$&");
+  /** Глоб → regex: `**` с косой чертой — ноль и более сегментов, `**` — что угодно, `*` — сегмент. */
+  const toRegex = (pattern) => {
+    let out = "";
+    for (let i = 0; i < pattern.length; i += 1) {
+      const ch = pattern[i];
+      if (ch === "*") {
+        if (pattern[i + 1] === "*") {
+          i += 1;
+          if (pattern[i + 1] === "/") {
+            i += 1;
+            out += "(?:.*/)?";
+          } else {
+            out += ".*";
+          }
+        } else {
+          out += "[^/]*";
+        }
+      } else if ("\\^$.|?+()[]{}".includes(ch)) {
+        out += `\\${ch}`;
+      } else {
+        out += ch;
+      }
+    }
+    return new RegExp(`^${out}(?:/.*)?$`);
+  };
   for (const raw of patterns) {
     const pattern = String(raw ?? "").trim();
     if (pattern === "") continue;
     const abs = path.isAbsolute(pattern) ? pattern : path.resolve(pattern);
-    const body = abs
-      .split("**")
-      .map((part) => part.split("*").map(esc).join("[^/]*"))
-      .join(".*");
     try {
-      if (new RegExp(`^${body}(?:/.*)?$`).test(value)) return true;
+      if (toRegex(abs).test(value)) return true;
     } catch {
       /* битый шаблон не должен ломать обход */
     }
