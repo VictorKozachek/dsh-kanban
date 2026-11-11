@@ -127,6 +127,10 @@ bin/task-commit.sh 007      # merge --no-ff, карточка -> merged, worktre
 Есть и светлая тема: [панель](dsh-kanban/docs/board-mockup-panel-light.png) ·
 [вся доска](dsh-kanban/docs/board-mockup-full-light.png).
 
+**Впервые здесь?** Начните с **[онбординга](docs/onboarding.ru.md)** — установка,
+подключение своего проекта, команда из четырёх ролей и первая карточка. *In English:
+[onboarding](docs/onboarding.md).*
+
 ## Установка
 
 **Требования:** DeepSeek Harness `0.2.1-rc.3` (приложение или `dsh web`) на macOS, `git` в

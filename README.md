@@ -127,6 +127,10 @@ the role and the token spend:
 A light theme is available too: [panel](dsh-kanban/docs/board-mockup-panel-light.png) ·
 [full board](dsh-kanban/docs/board-mockup-full-light.png).
 
+**New to dsh-kanban?** Start with the **[onboarding guide](docs/onboarding.md)** — install,
+connect your own project, build the four-role team and move the first card. *По-русски:
+[онбординг](docs/onboarding.ru.md).*
+
 ## Install
 
 **Requirements:** DeepSeek Harness `0.2.1-rc.3` (desktop app or `dsh web`) on macOS, `git` in
