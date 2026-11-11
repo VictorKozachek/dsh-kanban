@@ -28,6 +28,7 @@
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
 | `dsh-kanban/test/render.test.mjs` | Тест рендера: контекст, колонки, карточки, зачёркивание в `merged`, панель деталей (открытие, переключение, закрытие) |
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
+| `dsh-kanban/test/doctor.test.mjs` | Тесты `bin/doctor`: успешный проект и пустой (код 2) |
 | `dsh-kanban/test/delivery.test.mjs` | Тесты доставки наряда с поддельным сервисом сессий |
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
 | `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
@@ -48,6 +49,9 @@
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |
 | `bin/backlog-fill.sh` | Пополнить `todo` из `backlog` до `minTodo` и асайнить свободным исполнителям (`--dry-run`, `--min N`) |
 | `bin/task-assign.sh` | Асайн конкретной карточки самому свободному исполнителю (backlog → todo) и возврат в очередь (`--unassign`, `--dry-run`) |
+| `bin/doctor.sh`, `bin/doctor.mjs` | Проверка установки и первых шагов: node, доска, протокол, профиль, конфиг, диагностика сторожа, роли, pending (`--json`, коды 0/1/2) |
+| `bin/kanban-init.sh` | Развернуть протокол в проекте (аргумент — путь): `bin/`, `AGENTS.md`, `.kanban/`, `.gitignore`, `watcher-core.js` (`--print`, `--force`, идемпотентно) |
+| `bin/test-onboarding.sh` | Проверки онбординг-инструментов: `kanban-init`, идемпотентность, первая карточка, `board-status` |
 | `bin/host-shutdown-check.mjs` | Харнесс реального graceful shutdown Host-процесса DSH: сценарии control/board/roots/events, замеры ack и выхода (диагностика, не в bin/test.sh) |
 | `bin/spec-new.sh` | Завести спецификацию `.kanban/specs/<NNN>.md` по шаблону (сквозной номер) |
 | `.gitignore` | Служебные файлы доски (`.kanban/.watcher-*.json`, `.kanban/.workers.json`, `.kanban/worktrees.json`, `worktrees/`) — им не место в git |
@@ -76,6 +80,7 @@
 | `README.md`, `README.ru.md` | Пользовательская документация: зачем плагин, пример с одним воркспейсом и четырьмя сессиями ролей, установка и создание сессий (EN / RU) |
 | `dsh-kanban/docs/readme-sessions-*.png` | Кадры сайдбара с деревом воркспейсов и сессиями ролей для README (нарезаны из макета, тёмная и светлая тема) |
 | `dsh-kanban/docs/real-sidebar.png` | Реальный скриншот сайдбара приложения (дерево Workspaces), вставлен в README |
+| `dsh-kanban/docs/make-onboarding-demo.py` | Генератор анимации `onboarding-demo.gif` (Pillow, без браузера) |
 | `dsh-kanban/docs/onboarding-demo.gif` | Анимация «как работает доска» для README (генерируется `make-onboarding-demo.py`) |
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
 > `bin/`, `dsh-kanban/` в любой проект.
