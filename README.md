@@ -184,7 +184,7 @@ copies (e.g. `tmp/` clones) that would otherwise duplicate the same cards.
 **Verify the installation:**
 
 ```bash
-bin/test.sh                              # full suite (479 checks), no network needed
+bin/test.sh                              # full suite (490 checks), no network needed
 bin/node.sh bin/host-shutdown-check.mjs  # real Host graceful-shutdown harness (4 scenarios)
 ```
 
@@ -270,7 +270,7 @@ with architecture, isolation details and troubleshooting is in [KANBAN.md](KANBA
 ## Requirements and verification
 
 - DSH `0.2.1-rc.3`, macOS (bash 3.2), git; node comes from DSH via `bin/node.sh`.
-- `bin/test.sh` — 479 checks, no network: card parsing, worktree merging, notice planning,
+- `bin/test.sh` — 490 checks, no network: card parsing, worktree merging, notice planning,
   client rendering without a browser, the assign channel, child boards, presets
   self-healing, graceful shutdown, scripts and locales.
 - `bin/node.sh bin/host-shutdown-check.mjs` — boots a real Host process and checks that the
