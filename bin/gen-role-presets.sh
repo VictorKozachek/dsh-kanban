@@ -72,7 +72,10 @@ if [[ -z "$STANDARD" ]]; then
   APP_BIN="/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness"
   ASAR_FILE="/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml"
   if [[ -x "$APP_BIN" ]]; then
-    TEMP_STANDARD="$(mktemp "${TMPDIR:-/tmp}/standard.patch.XXXXXX.yml")"
+    # BSD/macOS mktemp требует, чтобы шаблон заканчивался на XXXXXX: суффикс
+    # после них (`….XXXXXX.yml`) он отвергает. Создаём без суффикса, расширение
+    # файлу не нужно — он только читается Node приложения.
+    TEMP_STANDARD="$(mktemp "${TMPDIR:-/tmp}/standard.patch.XXXXXX")"
     if ELECTRON_RUN_AS_NODE=1 "$APP_BIN" -e \
       'const fs=require("fs"); fs.writeFileSync(process.argv[1], fs.readFileSync(process.argv[2]))' \
       "$TEMP_STANDARD" "$ASAR_FILE" 2>/dev/null; then

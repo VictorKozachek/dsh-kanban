@@ -388,5 +388,48 @@ await check("зависший cwd сессии не отправляет prompt 
   ctx.pick("dispose")();
 });
 
+await check("вложенная доска: наряд уходит сессии дочерней доски, а не пропускается", async () => {
+  const parent = makeBoard([]);
+  const child = path.join(parent, "component");
+  fs.mkdirSync(path.join(child, ".kanban", "tasks"), { recursive: true });
+  const owner = "session-6af8ff46-f3e7-4640-8a2d-045543fbc030";
+  writeCard(child, "031", "todo", { owner });
+  const calls = [];
+  const ctx = makeCtx(calls);
+  ctx.get = (name) => (name === "sessionQuery" ? { observeSession: async () => ({ header: { cwd: child } }) } : undefined);
+  apply(ctx, { boards: [], roots: [parent], catchUpMs: 20, debounceMs: 10 });
+  assert.ok(await waitFor(() => calls.length > 0), "наряд дочерней доски не доставлен");
+  assert.equal(calls[0].sessionId, owner);
+  ctx.pick("dispose")();
+});
+
+await check("человекочитаемый owner не зовёт prompt и не пишет pending", async () => {
+  const board = makeBoard([["032", "todo", { owner: "executor-skills (DSH)" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  ctx.get = (name) => (name === "sessionQuery" ? { observeSession: async () => ({ header: { cwd: board } }) } : undefined);
+  apply(ctx, { boards: [board], catchUpMs: 20, debounceMs: 10 });
+  await sleep(300);
+  assert.equal(calls.length, 0, "prompt вызван для невалидного owner");
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  const pending = fs.existsSync(pendingFile) ? JSON.parse(fs.readFileSync(pendingFile, "utf8")) : {};
+  assert.deepEqual(Object.keys(pending), [], "невалидный owner осел в pending");
+  ctx.pick("dispose")();
+});
+
+await check("доска рабочего дерева не считается отдельной доской", async () => {
+  const root = makeBoard([]);
+  const tree = path.join(root, "worktrees", "001");
+  fs.mkdirSync(path.join(tree, ".kanban", "tasks"), { recursive: true });
+  writeCard(tree, "033", "todo", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" });
+  const calls = [];
+  const ctx = makeCtx(calls);
+  ctx.get = (name) => (name === "sessionQuery" ? { observeSession: async () => ({ header: { cwd: tree } }) } : undefined);
+  apply(ctx, { boards: [], roots: [root], catchUpMs: 20, debounceMs: 10 });
+  await sleep(300);
+  assert.equal(calls.length, 0, "worktree стал отдельной доской и получил наряд");
+  ctx.pick("dispose")();
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);
