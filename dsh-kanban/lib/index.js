@@ -65,7 +65,7 @@ import {
 } from "./card-actions.js";
 import { registerChildrenService } from "./children.js";
 import { registerRolePresets } from "./presets.js";
-import { isSessionId, pickBoardRoot } from "./watcher-core.js";
+import { isIgnoredPath, isSessionId, pickBoardRoot } from "./watcher-core.js";
 
 // ---------------------------------------------------------------------------
 // Диагностика сторожа (issue #2): что видит host-половина и почему не доставляет
@@ -238,7 +238,7 @@ const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "build", "template
  * @param maxDepth - глубина обхода (компонент обычно на 2–4 уровня ниже корня).
  * @returns Абсолютные пути каталогов с досками.
  */
-function discoverBoards(root, maxDepth = 6) {
+function discoverBoards(root, maxDepth = 6, ignore = []) {
   const found = [];
   /**
    * Git-worktree задачи — не самостоятельная доска: `tmp/qa/wt-*`, `tmp/review/*`
@@ -256,6 +256,7 @@ function discoverBoards(root, maxDepth = 6) {
   };
   const walk = (dir, depth) => {
     if (depth > maxDepth) return;
+    if (isIgnoredPath(dir, ignore)) return;
     if (isGitWorktree(dir)) return;
     try {
       if (fs.statSync(path.join(dir, ".kanban", "tasks")).isDirectory()) {
@@ -556,11 +557,17 @@ export function apply(ctx, config = {}) {
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
     /** Корни, под которыми сторож ищет доски каждого воркспейса. */
     const roots = Array.isArray(config?.roots) ? config.roots.map((entry) => path.resolve(String(entry))) : [];
-    /** Все наблюдаемые доски: явные `boards` + найденные под `roots`. */
+    /** Исключения обхода: клоны/эксперименты (`tmp/**`), чужие каталоги. */
+    const ignorePaths = Array.isArray(config?.ignore) ? config.ignore.map(String) : [];
+    /** Все наблюдаемые доски: явные `boards` + найденные под `roots` (минус ignore). */
     const watchedBoards = () => {
-      const set = new Set(boards.map((entry) => path.resolve(String(entry && typeof entry === "object" ? entry.path : entry))));
+      const set = new Set();
+      for (const entry of boards) {
+        const dir = path.resolve(String(entry && typeof entry === "object" ? entry.path : entry));
+        if (!isIgnoredPath(dir, ignorePaths)) set.add(dir);
+      }
       for (const root of roots) {
-        for (const found of discoverBoards(root)) set.add(path.resolve(found));
+        for (const found of discoverBoards(root, 6, ignorePaths)) set.add(path.resolve(found));
       }
       return [...set];
     };

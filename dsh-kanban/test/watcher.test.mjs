@@ -4,7 +4,7 @@
  * Запуск: node dsh-kanban/test/watcher.test.mjs
  */
 import assert from "node:assert/strict";
-import { deliveryKey, parseCard, planNotices, snapshotCards, pickBoardRoot, isSessionId } from "../lib/watcher-core.js";
+import { deliveryKey, parseCard, planNotices, snapshotCards, pickBoardRoot, isIgnoredPath, isSessionId } from "../lib/watcher-core.js";
 
 let failed = 0;
 let passed = 0;
@@ -237,6 +237,19 @@ check("стартовый снимок: ждущие роль карточки �
     notices.map((item) => [item.cardId, item.kind]),
     [["007", "review"], ["008", "test"], ["009", "merge"]]
   );
+});
+
+await check("ignore: путь и его потомки исключаются", async () => {
+  assert.equal(isIgnoredPath("/proj/a/tmp/x", ["/proj/a/tmp"]), true);
+  assert.equal(isIgnoredPath("/proj/a/tmp", ["/proj/a/tmp"]), true);
+  assert.equal(isIgnoredPath("/proj/a/other", ["/proj/a/tmp"]), false);
+});
+
+await check("ignore: шаблоны * и **", async () => {
+  assert.equal(isIgnoredPath("/proj/a/mcp/bank/tmp/wt-1", ["/proj/a/**/tmp"]), true);
+  assert.equal(isIgnoredPath("/proj/a/tmp", ["/proj/a/*/tmp"]), false);
+  assert.equal(isIgnoredPath("/proj/a/x/tmp", ["/proj/a/*/tmp"]), true);
+  assert.equal(isIgnoredPath("/proj/a/x/tmp/y", ["/proj/a/x/tmp/*"]), true);
 });
 
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);

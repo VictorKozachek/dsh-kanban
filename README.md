@@ -161,10 +161,25 @@ config:
     - !!js process.env.HOME + '/projects/dsh-kanban'
   roots:                        # trees to scan for boards of nested workspaces
     - !!js process.env.HOME + '/projects/ai-fabric/aif-project'
+  # ignore:                     # do not scan copies/experiments (globs: *, **)
+  #   - !!js process.env.HOME + '/projects/ai-fabric/aif-project/**/tmp'
 ```
 
-By default the paths are computed from `$HOME`; edit them to match your machine. After a
-restart, open a conversation, click **+** in the sidebar tab strip and add **Kanban**.
+By default the paths are computed from `$HOME`; set them to your own project. Prefer a
+**profile override** instead of editing the file in the clone (it is tracked by git) —
+`~/.dsh/cordis.patch.yml`:
+
+```yaml
+- id: ui-kanban
+  config:
+    boards:
+      - /absolute/path/to/your/project
+    roots: []
+```
+
+After a restart, open a conversation, click **+** in the sidebar tab strip and add **Kanban**.
+`worktrees/` and git worktrees are never scanned as separate boards; `ignore` is for other
+copies (e.g. `tmp/` clones) that would otherwise duplicate the same cards.
 
 **Verify the installation:**
 

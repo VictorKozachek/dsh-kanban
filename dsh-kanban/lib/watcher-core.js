@@ -40,6 +40,31 @@ export function pickBoardRoot(roots, cwd) {
  * `session not found`, наряд навсегда оседал в `.watcher-pending.json`.
  * Такие владельцы надо не отправлять, а предупреждать (issue #2).
  */
+/**
+ * Путь исключён из обхода досок? Шаблоны — абсолютные или относительные пути,
+ * поддерживают `*` (один сегмент) и `**` (любая глубина). Совпадение пути или
+ * любого каталога внутри него: шаблон с `**` убирает клоны из tmp на любой глубине.
+ */
+export function isIgnoredPath(target, patterns = []) {
+  const value = path.resolve(String(target));
+  const esc = (part) => part.replace(/[.+^${}()|[\]\\?]/g, "\\$&");
+  for (const raw of patterns) {
+    const pattern = String(raw ?? "").trim();
+    if (pattern === "") continue;
+    const abs = path.isAbsolute(pattern) ? pattern : path.resolve(pattern);
+    const body = abs
+      .split("**")
+      .map((part) => part.split("*").map(esc).join("[^/]*"))
+      .join(".*");
+    try {
+      if (new RegExp(`^${body}(?:/.*)?$`).test(value)) return true;
+    } catch {
+      /* битый шаблон не должен ломать обход */
+    }
+  }
+  return false;
+}
+
 export function isSessionId(value) {
   if (typeof value !== "string") return false;
   const id = value.trim();
