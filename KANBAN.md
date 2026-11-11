@@ -76,6 +76,7 @@
 | `README.md`, `README.ru.md` | Пользовательская документация: зачем плагин, пример с одним воркспейсом и четырьмя сессиями ролей, установка и создание сессий (EN / RU) |
 | `dsh-kanban/docs/readme-sessions-*.png` | Кадры сайдбара с деревом воркспейсов и сессиями ролей для README (нарезаны из макета, тёмная и светлая тема) |
 | `dsh-kanban/docs/real-sidebar.png` | Реальный скриншот сайдбара приложения (дерево Workspaces), вставлен в README |
+| `dsh-kanban/docs/onboarding-demo.gif` | Анимация «как работает доска» для README (генерируется `make-onboarding-demo.py`) |
 > Весь набор переносим: скопируйте `.kanban/`, `AGENTS.md`, `.agents/skills/kanban/`,
 > `bin/`, `dsh-kanban/` в любой проект.
 

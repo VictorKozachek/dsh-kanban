@@ -131,6 +131,26 @@ A light theme is available too: [panel](dsh-kanban/docs/board-mockup-panel-light
 connect your own project, build the four-role team and move the first card. *По-русски:
 [онбординг](docs/onboarding.ru.md).*
 
+## Quick start
+
+![How the board works: a card moves from backlog to merge, and every transition sends an assignment to the role session](dsh-kanban/docs/onboarding-demo.gif)
+
+The loop in one picture: a card is created, gets an owner, moves through the columns, and each
+transition sends a watcher assignment to the role session.
+
+1. **Install the plugin** — `bin/install-kanban.sh desktop` (or `web`) and restart DSH.
+2. **Point it at your project** — set `boards` in `~/.dsh/cordis.patch.yml` (the profile patch,
+   not the tracked file in the clone); restart and check `/tmp/dsh-kanban-watch.diag.json`.
+3. **Put the task protocol into your project** — copy `bin/`, `AGENTS.md`, `.kanban/` and
+   `dsh-kanban/lib/watcher-core.js` (exact list in the onboarding guide); commit.
+4. **Create the team** — one workspace, four sessions with presets `dispatcher`, `worker`,
+   `reviewer`, `verifier`; open the **Kanban** tab in the right sidebar.
+5. **Create the first card** — `bin/task-new.sh "Fix the QR export"`, assign it to the worker
+   (GUI or `bin/task-move.sh 001 todo --owner <session-id>`) and watch it move.
+
+Full walkthrough with commands and troubleshooting: **[onboarding guide](docs/onboarding.md)**
+(*по-русски: [онбординг](docs/onboarding.ru.md)*).
+
 ## Install
 
 **Requirements:** DeepSeek Harness `0.2.1-rc.3` (desktop app or `dsh web`) on macOS, `git` in
