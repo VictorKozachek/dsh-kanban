@@ -100,6 +100,9 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]{1,200}$/;
 /** Сколько ждать `bin/task-assign.sh`: асайн — локальная файловая операция. */
 const SCRIPT_TIMEOUT_MS = 20_000;
 
+/** Предел ожидания рабочего каталога сессии: не даём доставке зависнуть. */
+const CWD_TIMEOUT_MS = 5_000;
+
 /** Предел текста, который уходит в GUI: баннер не должен разрастаться. */
 const MAX_MESSAGE = 400;
 
@@ -509,21 +512,40 @@ export function registerCardActionsService(ctx, options) {
  * @param sessionId - id сессии.
  * @returns путь рабочего каталога или `null`.
  */
-export async function sessionCwdFromContext(ctx, sessionId) {
+export async function sessionCwdFromContext(ctx, sessionId, options = {}) {
   const query = ctx?.get?.("sessionQuery");
   if (!query || typeof query.observeSession !== "function") return null;
-  const lease = await query.observeSession(sessionId, { projectionMode: "none" });
+  // Таймаут обязателен: у холодной/архивной сессии observeSession может не
+  // ответить, и тогда вся доставка (и очередь нарядов) вставала бы навсегда.
+  const timeoutMs = Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0 ? Number(options.timeoutMs) : CWD_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timer;
+  let lease;
+  // Не только abort: некоторые реализации не реагируют на signal, поэтому гоним
+  // гонку с таймаутом, иначе доставка зависает навсегда (issue #3).
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`session-query/timeout: ${sessionId} не ответил за ${timeoutMs} мс`));
+    }, timeoutMs);
+  });
   try {
-    const cwd = lease?.header?.cwd;
-    return typeof cwd === "string" && cwd.length > 0 ? cwd : null;
+    lease = await Promise.race([
+      query.observeSession(sessionId, { projectionMode: "none", signal: controller.signal }),
+      timeout,
+    ]);
   } finally {
-    const release = lease?.[Symbol.dispose];
+    clearTimeout(timer);
+    // Освобождение lease: поддерживаем и sync-, и async-dispose.
+    const release = lease?.[Symbol.dispose] ?? lease?.[Symbol.asyncDispose];
     if (typeof release === "function") {
       try {
-        release.call(lease);
+        await release.call(lease);
       } catch {
         /* освобождение lease не должно ломать ответ канала */
       }
     }
   }
+  const cwd = lease?.header?.cwd;
+  return typeof cwd === "string" && cwd.length > 0 ? cwd : null;
 }

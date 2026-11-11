@@ -364,5 +364,29 @@ await check("heartbeat диагностики не падает без dispose",
   ctx.pick("dispose")();
 });
 
+await check("prompt, который не отвечает, уходит в pending по таймауту", async () => {
+  const board = makeBoard([["020", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
+  const ctx = makeCtx([]);
+  ctx.sessionController.prompt = () => new Promise(() => {});
+  apply(ctx, { boards: [board], roles: { reviewer: "session-1a7e1a7e-0000-4000-8000-000000000001" }, catchUpMs: 10, debounceMs: 10, deliverTimeoutMs: 20 });
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  assert.ok(await waitFor(() => fs.existsSync(pendingFile)), "pending не появился после таймаута");
+  const pending = JSON.parse(fs.readFileSync(pendingFile, "utf8"));
+  assert.ok(Object.keys(pending).length > 0, "наряд не сохранён в pending");
+  ctx.pick("dispose")();
+});
+
+await check("зависший cwd сессии не отправляет prompt и пишет pending", async () => {
+  const board = makeBoard([["021", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls);
+  ctx.get = (name) => (name === "sessionQuery" ? { observeSession: () => new Promise(() => {}) } : undefined);
+  apply(ctx, { boards: [board], roles: { reviewer: "session-1a7e1a7e-0000-4000-8000-000000000001" }, catchUpMs: 10, debounceMs: 10, cwdTimeoutMs: 20 });
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  assert.ok(await waitFor(() => fs.existsSync(pendingFile)), "pending не появился после таймаута cwd");
+  assert.equal(calls.length, 0, "prompt вызван без подтверждённого cwd");
+  ctx.pick("dispose")();
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);

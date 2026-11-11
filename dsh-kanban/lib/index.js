@@ -184,6 +184,15 @@ const DEBOUNCE_MS = 400;
 /** Пауза перед разбором «что уже ждёт роль»: дать профилю подняться. */
 const CATCH_UP_MS = 2000;
 
+/** Сколько доставок одновременно: не штурмуем десятки холодных сессий сразу. */
+const DELIVERY_CONCURRENCY = 3;
+
+/** Предел ожидания prompt: по нему наряд уходит в pending и повторяется позже. */
+const DELIVER_TIMEOUT_MS = 15_000;
+
+/** Предел ожидания cwd сессии (см. sessionCwdFromContext). */
+const CWD_TIMEOUT_MS = 5_000;
+
 /** Лог плагина: у cordis логгер может быть и функцией, и объектом. */
 function log(ctx, level, message) {
   try {
@@ -491,6 +500,26 @@ const ROLES_FILE = ".watcher-roles.json";
 /** Файл недоставленных нарядов: их повторяем при следующем старте профиля. */
 const PENDING_FILE = ".watcher-pending.json";
 
+/** Семафор доставок: `acquire`/`release`, лимит параллельных попыток. */
+function createDeliveryGate(limit) {
+  let active = 0;
+  const queue = [];
+  return {
+    async acquire() {
+      if (active < limit) {
+        active += 1;
+        return;
+      }
+      await new Promise((resolve) => queue.push(resolve));
+    },
+    release() {
+      const next = queue.shift();
+      if (next) next();
+      else active -= 1;
+    },
+  };
+}
+
 /** Роль по id пресета: `reviewer` и `preset-reviewer` — это одно и то же. */
 function roleOfPreset(agentPreset) {
   const name = String(agentPreset ?? "").replace(/^preset-/, "");
@@ -710,6 +739,11 @@ export function apply(ctx, config = {}) {
     // Паузы настраиваются: тесты доставки берут короткие, живой профиль — обычные.
     const debounceMs = Number.isFinite(config?.debounceMs) ? Number(config.debounceMs) : DEBOUNCE_MS;
     const catchUpMs = Number.isFinite(config?.catchUpMs) ? Number(config.catchUpMs) : CATCH_UP_MS;
+    const deliveryConcurrency = Number.isFinite(config?.deliveryConcurrency) && config.deliveryConcurrency > 0 ? Math.floor(config.deliveryConcurrency) : DELIVERY_CONCURRENCY;
+    const deliverTimeoutMs = Number.isFinite(config?.deliverTimeoutMs) && config.deliverTimeoutMs > 0 ? Number(config.deliverTimeoutMs) : DELIVER_TIMEOUT_MS;
+    const cwdTimeoutMs = Number.isFinite(config?.cwdTimeoutMs) && config.cwdTimeoutMs > 0 ? Number(config.cwdTimeoutMs) : CWD_TIMEOUT_MS;
+    /** Один семафор на весь плагин: лимит держится по всем доскам сразу. */
+    const deliveryGate = createDeliveryGate(deliveryConcurrency);
 
     // Самопроверка канала — после стартовой паузы, когда gateway уже смонтирован
     // (синхронная проба в apply давала ложный «не объявил»). Таймер снимается в
@@ -779,20 +813,39 @@ export function apply(ctx, config = {}) {
       }
       const controller = new AbortController();
       controllers.add(controller);
+      let timer;
+      // Гонка с таймаутом, а не только abort: prompt может не реагировать на
+      // signal, и тогда без race доставка зависала (issue #3).
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`dsh-kanban/delivery-timeout: ${deliverTimeoutMs} мс`));
+        }, deliverTimeoutMs);
+      });
       try {
-        await service.prompt(
-          {
-            requestId: randomUUID(),
-            sessionId: item.sessionId,
-            mode: "queue",
-            content: [{ type: "text", text: noticeText(item) }],
-          },
-          controller.signal,
-        );
+        await Promise.race([
+          service.prompt(
+            {
+              requestId: randomUUID(),
+              sessionId: item.sessionId,
+              mode: "queue",
+              content: [{ type: "text", text: noticeText(item) }],
+            },
+            controller.signal,
+          ),
+          timeout,
+        ]);
         if (disposed) return { ok: false, permanent: false };
         log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) → ${item.sessionId}`);
         return { ok: true, permanent: false };
       } catch (error) {
+        if (controller.signal.aborted && !disposed) {
+          // Не смерть плагина, а наш собственный таймаут: наряд в pending,
+          // повтор после следующего старта/события (issue #3).
+          diagEvent({ step: "deliver-timeout", card: item.cardId ?? null, session: item.sessionId ?? null, timeoutMs: deliverTimeoutMs });
+          log(ctx, "warn", `наряд по #${item.cardId} не доставлен за ${deliverTimeoutMs} мс: ${item.sessionId}`);
+          return { ok: false, permanent: false };
+        }
         if (controller.signal.aborted || disposed) {
           log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) отменён: плагин выгружается`);
           return { ok: false, permanent: false };
@@ -806,6 +859,7 @@ export function apply(ctx, config = {}) {
         log(ctx, "warn", `наряд по #${item.cardId} не доставлен (${item.sessionId}): ${error?.message ?? error}`);
         return { ok: false, permanent };
       } finally {
+        clearTimeout(timer);
         controllers.delete(controller);
       }
     };
@@ -844,21 +898,46 @@ export function apply(ctx, config = {}) {
       // появлению роли, или стартовый и повтор недоставленного) успевают запланировать
       // один и тот же наряд дважды.
       const inFlight = new Set();
+      /** Запомнить недostавленный наряд: повторим на старте/следующем событии. */
+      const rememberPending = (key, item) => {
+        pending[key] = {
+          cardId: item.cardId,
+          status: item.status,
+          sessionId: item.sessionId,
+          text: item.text,
+          // Рабочее дерево — часть текста наряда, поэтому едет вместе с ним.
+          worktree: item.worktree ?? "",
+          at: new Date().toISOString(),
+        };
+        saveState(pendingFile, pending);
+      };
       const deliverOnce = (key, item) => {
         if (disposed) return;
         if (state[key] || inFlight.has(key)) return;
         diagEvent({ board: root, step: "deliver-once", key, card: item.cardId ?? null, session: item.sessionId ?? null });
         inFlight.add(key);
         void (async () => {
+          await deliveryGate.acquire();
           try {
+            if (disposed) return;
             // Граница доски: наряд уходит только сессии, чей каталог внутри этого корня.
             let cwd = null;
+            let cwdFailed = false;
             try {
-              cwd = await sessionCwdFromContext(ctx, item.sessionId);
+              cwd = await sessionCwdFromContext(ctx, item.sessionId, { timeoutMs: cwdTimeoutMs });
             } catch {
+              // Таймаут/ошибка чтения cwd — не повод штурмовать сессию вслепую:
+              // наряд остаётся в pending и повторится позже (issue #3).
+              cwdFailed = true;
               cwd = null;
             }
             if (disposed) return;
+            if (cwdFailed) {
+              diagEvent({ board: root, step: "cwd-timeout", card: item.cardId ?? null, session: item.sessionId ?? null, timeoutMs: cwdTimeoutMs });
+              log(ctx, "warn", `наряд по #${item.cardId} отложен: cwd сессии ${item.sessionId} не получен за ${cwdTimeoutMs} мс`);
+              rememberPending(key, item);
+              return;
+            }
             diagEvent({ board: root, step: "deliver-cwd", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
             if (cwd !== null && boardRootOf(cwd) !== path.resolve(root)) {
               diagEvent({ board: root, step: "deliver-skipped-board", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
@@ -883,16 +962,7 @@ export function apply(ctx, config = {}) {
             if (!accepted) {
               // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
               // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
-              pending[key] = {
-                cardId: item.cardId,
-                status: item.status,
-                sessionId: item.sessionId,
-                text: item.text,
-                // Рабочее дерево — часть текста наряда, поэтому едет вместе с ним.
-                worktree: item.worktree ?? "",
-                at: new Date().toISOString(),
-              };
-              saveState(pendingFile, pending);
+              rememberPending(key, item);
               return;
             }
             state[key] = new Date().toISOString();
@@ -903,6 +973,7 @@ export function apply(ctx, config = {}) {
             }
           } finally {
             inFlight.delete(key);
+            deliveryGate.release();
           }
         })();
       };
