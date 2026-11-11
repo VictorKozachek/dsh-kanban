@@ -141,8 +141,8 @@ bin/task-commit.sh 007      # merge --no-ff, карточка -> merged, worktre
 1. **Поставить плагин** — `bin/install-kanban.sh desktop` (или `web`) и перезапустить DSH.
 2. **Указать свой проект** — `boards` в `~/.dsh/cordis.patch.yml` (профильный патч, не файл в
    клоне); перезапустить и проверить `/tmp/dsh-kanban-watch.diag.json`.
-3. **Положить протокол в проект** — скопировать `bin/`, `AGENTS.md`, `.kanban/` и
-   `dsh-kanban/lib/watcher-core.js` (точный список — в онбординге); закоммитить.
+3. **Положить протокол в проект** — `bin/kanban-init.sh <проект>`; закоммитить и
+   проверить `bin/doctor.sh`.
 4. **Создать команду** — один workspace, четыре сессии с пресетами `dispatcher`, `worker`,
    `reviewer`, `verifier`; открыть вкладку **«Канбан»** в правом сайдбаре.
 5. **Завести первую карточку** — `bin/task-new.sh "Починить экспорт QR"`, выдать исполнителю

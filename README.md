@@ -141,8 +141,8 @@ transition sends a watcher assignment to the role session.
 1. **Install the plugin** — `bin/install-kanban.sh desktop` (or `web`) and restart DSH.
 2. **Point it at your project** — set `boards` in `~/.dsh/cordis.patch.yml` (the profile patch,
    not the tracked file in the clone); restart and check `/tmp/dsh-kanban-watch.diag.json`.
-3. **Put the task protocol into your project** — copy `bin/`, `AGENTS.md`, `.kanban/` and
-   `dsh-kanban/lib/watcher-core.js` (exact list in the onboarding guide); commit.
+3. **Put the task protocol into your project** — `bin/kanban-init.sh <project>`; commit
+   and run `bin/doctor.sh`.
 4. **Create the team** — one workspace, four sessions with presets `dispatcher`, `worker`,
    `reviewer`, `verifier`; open the **Kanban** tab in the right sidebar.
 5. **Create the first card** — `bin/task-new.sh "Fix the QR export"`, assign it to the worker

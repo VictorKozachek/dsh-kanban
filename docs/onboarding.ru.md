@@ -65,41 +65,22 @@ cat /tmp/dsh-kanban-watch.diag.json
 
 ## Шаг 3. Положить протокол в проект
 
-Агенты читают правила из `AGENTS.md` и работают скриптами из `bin/` **вашего**
-проекта. Скопируйте минимальный набор (проверено, что его достаточно):
+Одна команда разворачивает в проекте всё, что нужно агентам и скриптам:
 
 ```bash
-cd ~/projects/my-project
-mkdir -p bin .kanban/tasks .kanban/specs dsh-kanban/lib
-
-SRC=~/dsh-kanban
-cp "$SRC"/bin/{task-new,task-move,task-assign,task-commit,spec-new}.sh bin/
-cp "$SRC"/bin/{backlog-fill,board-sync,board-children,board-status}.sh bin/
-cp "$SRC"/bin/{node.sh,board-status.mjs} bin/
-
-# board-status разбирает карточки тем же кодом, что и плагин:
-cp "$SRC/dsh-kanban/lib/watcher-core.js" dsh-kanban/lib/
-
-cp "$SRC/AGENTS.md" .
-cp "$SRC/.kanban/tasks/README.md" .kanban/tasks/
-cp "$SRC/.kanban/board.json" .kanban/          # { "minTodo": 3 }
+~/dsh-kanban/bin/kanban-init.sh ~/projects/my-project
 ```
 
-Добавьте в `.gitignore` служебные файлы доски:
-
-```gitignore
-.kanban/.watcher-state.json
-.kanban/.watcher-roles.json
-.kanban/.watcher-pending.json
-.kanban/.workers.json
-.kanban/worktrees.json
-worktrees/
-.worktrees/
-```
+Она копирует `bin/` (задачи, доска, doctor), `AGENTS.md`, формат карточек,
+`.kanban/board.json`, `.gitignore`-блок и `dsh-kanban/lib/watcher-core.js`
+(нужен `board-status`). Существующие файлы не перезаписываются; `--print`
+показывает план, `--force` перезаписывает.
 
 Проверка:
 
 ```bash
+cd ~/projects/my-project
+bin/doctor.sh                # что установлено и чего не хватает
 bin/board-status.sh          # пустая доска — это нормально
 git add -A && git commit -m "kanban: протокол задач"
 ```

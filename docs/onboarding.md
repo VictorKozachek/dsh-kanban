@@ -67,41 +67,22 @@ cat /tmp/dsh-kanban-watch.diag.json
 
 ## Step 3. Put the protocol into the project
 
-Agents read the rules from `AGENTS.md` and use the scripts from **your project's**
-`bin/`. Copy this minimal set (verified to be enough):
+One command scaffolds everything the agents and scripts need:
 
 ```bash
-cd ~/projects/my-project
-mkdir -p bin .kanban/tasks .kanban/specs dsh-kanban/lib
-
-SRC=~/dsh-kanban
-cp "$SRC"/bin/{task-new,task-move,task-assign,task-commit,spec-new}.sh bin/
-cp "$SRC"/bin/{backlog-fill,board-sync,board-children,board-status}.sh bin/
-cp "$SRC"/bin/{node.sh,board-status.mjs} bin/
-
-# board-status parses cards with the same code as the plugin:
-cp "$SRC/dsh-kanban/lib/watcher-core.js" dsh-kanban/lib/
-
-cp "$SRC/AGENTS.md" .
-cp "$SRC/.kanban/tasks/README.md" .kanban/tasks/
-cp "$SRC/.kanban/board.json" .kanban/          # { "minTodo": 3 }
+~/dsh-kanban/bin/kanban-init.sh ~/projects/my-project
 ```
 
-Add the board's local state to `.gitignore`:
-
-```gitignore
-.kanban/.watcher-state.json
-.kanban/.watcher-roles.json
-.kanban/.watcher-pending.json
-.kanban/.workers.json
-.kanban/worktrees.json
-worktrees/
-.worktrees/
-```
+It copies `bin/` (tasks, board, doctor), `AGENTS.md`, the card format,
+`.kanban/board.json`, the `.gitignore` block and
+`dsh-kanban/lib/watcher-core.js` (used by `board-status`). Existing files are not
+overwritten; `--print` shows the plan, `--force` overwrites.
 
 Check:
 
 ```bash
+cd ~/projects/my-project
+bin/doctor.sh                # what is installed and what is missing
 bin/board-status.sh          # an empty board is fine
 git add -A && git commit -m "kanban: task protocol"
 ```
