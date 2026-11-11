@@ -354,5 +354,15 @@ await check("устаревший след не отправляется и сн
   ctx.pick("dispose")();
 });
 
+await check("heartbeat диагностики не падает без dispose", async () => {
+  const board = makeBoard([["011", "backlog", { owner: "" }]]);
+  const ctx = makeCtx([]);
+  apply(ctx, { boards: [board], catchUpMs: 10, debounceMs: 10, heartbeatMs: 5 });
+  // Старый баг (7bdcd86) ронял процесс необработанным ReferenceError: disposed.
+  await sleep(40);
+  assert.ok(true, "процесс жив");
+  ctx.pick("dispose")();
+});
+
 console.log(`\nвсего: ${passed} ok, ${failed} провал(ов)`);
 process.exit(failed > 0 ? 1 : 0);

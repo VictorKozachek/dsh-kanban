@@ -506,16 +506,22 @@ function roleOfPreset(agentPreset) {
 export function apply(ctx, config = {}) {
   /** Пульс применения: объявлен до первого использования (TDZ в ESM). */
   let heartbeatTimer = null;
+  /** Состояние жизни плагина: флаг должен быть объявлен до таймеров/heartbeat. */
+  let disposed = false;
   diagState.applyCount += 1;
   const applyRecord = { at: new Date().toISOString(), apply: diagState.applyCount, error: null };
   diagState.applies.push(applyRecord);
   if (diagState.applies.length > 10) diagState.applies.shift();
   diag({ config: { boards: config?.boards ?? null, roots: config?.roots ?? null }, events: [], boards: [] });
   // Пульс: если процесс жив, а apply «завис»/не дошёл — видно по heartbeatAt.
+  // Интервал настраивается для тестов; `disposed` объявлен выше — таймер живёт
+  // вне try и не должен падать с ReferenceError (issue #3, регрессия 7bdcd86).
+  const heartbeatMs = Number.isFinite(config?.heartbeatMs) && config.heartbeatMs > 0 ? Number(config.heartbeatMs) : 20000;
   heartbeatTimer = setInterval(() => {
     if (disposed) return;
     diag({ heartbeatAt: new Date().toISOString() });
-  }, 20000);
+  }, heartbeatMs);
+  heartbeatTimer.unref?.();
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
@@ -540,11 +546,9 @@ export function apply(ctx, config = {}) {
      * Состояние жизни плагина. `disposed` — единый флаг: выставляется в начале
      * dispose, после него никакие обработчики (события файловой системы, тики,
      * доставки, асайны из GUI) не создают новых таймеров, наблюдателей и
-     * процессов, а уже созданные закрываются. Обработчик dispose регистрируется
-     * здесь, до раннего выхода «нет досок»: служба канала и проба живут и без
-     * сторожа, и они тоже должны сниматься.
+     * процессов, а уже созданные закрываются. Объявлен в начале apply: heartbeat
+     * (диагностика) живёт вне `try` и тоже проверяет этот флаг.
      */
-    let disposed = false;
     /** Жизнь плагина: по dispose отменяет дочерние процессы bin/task-assign.sh. */
     const lifetime = new AbortController();
     /** In-flight доставки: у каждой свой signal, по dispose все отменяются. */
@@ -722,6 +726,10 @@ export function apply(ctx, config = {}) {
 
     diag({ watched: watchedBoards() });
     if (boards.length === 0 && roots.length === 0) {
+      if (heartbeatTimer !== null) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       diag({ fatal: "в конфиге плагина нет boards и roots" });
       log(ctx, "info", "сторож доски выключен: в конфиге плагина нет boards и roots");
       return;
@@ -1176,6 +1184,10 @@ export function apply(ctx, config = {}) {
     diag({ applied: { at: new Date().toISOString(), watchers: watchers.length, boards: watchedBoards().length } });
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${[...rolesByRoot.values()].reduce((n, item) => n + Object.keys(item).length, 0)}`);
   } catch (error) {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
     applyRecord.error = String(error?.stack ?? error?.message ?? error);
     diag({ fatal: applyRecord.error });
     log(ctx, "warn", `сторож доски не запустился: ${error?.message ?? error}`);
