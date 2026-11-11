@@ -74,6 +74,24 @@ import { isSessionId, pickBoardRoot } from "./watcher-core.js";
 // `DSH_KANBAN_DIAG_PATH`. Никогда не бросает: диагностика не может уронить сторож.
 // ---------------------------------------------------------------------------
 const DIAG_PATH = process.env.DSH_KANBAN_DIAG_PATH || "/tmp/dsh-kanban-watch.diag.json";
+// Маркер загрузки модуля: файл появляется при импорте host-половины, ещё до apply.
+// Если после обычного запуска маркера нет — плагин даже не импортировали (row);
+// если маркер есть, а apply в диагностике нет — строка не активировалась.
+try {
+  fs.writeFileSync(
+    `/tmp/dsh-kanban-plugin-loaded-${process.pid}.json`,
+    JSON.stringify({
+      pid: process.pid,
+      ppid: process.ppid,
+      at: new Date().toISOString(),
+      cwd: process.cwd(),
+      argv: process.argv.slice(0, 4),
+    }),
+  );
+} catch {
+  /* маркер не должен мешать загрузке */
+}
+
 const diagState = {
   pid: process.pid,
   startedAt: new Date().toISOString(),
@@ -213,8 +231,23 @@ const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "build", "template
  */
 function discoverBoards(root, maxDepth = 6) {
   const found = [];
+  /**
+   * Git-worktree задачи — не самостоятельная доска: `tmp/qa/wt-*`, `tmp/review/*`
+   * и подобные каталоги наследуют карточки своего компонента и давали лавину
+   * «чужих» досок и пропущенных нарядов (issue #3). У worktree `.git` — файл.
+   */
+  const isGitWorktree = (dir) => {
+    try {
+      const meta = path.join(dir, ".git");
+      if (!fs.statSync(meta).isFile()) return false;
+      return /gitdir:\s*.*worktrees\//i.test(fs.readFileSync(meta, "utf8"));
+    } catch {
+      return false;
+    }
+  };
   const walk = (dir, depth) => {
     if (depth > maxDepth) return;
+    if (isGitWorktree(dir)) return;
     try {
       if (fs.statSync(path.join(dir, ".kanban", "tasks")).isDirectory()) {
         found.push(dir);
@@ -471,11 +504,18 @@ function roleOfPreset(agentPreset) {
  * @param config - `{ boards, roles }` из строки плагина.
  */
 export function apply(ctx, config = {}) {
+  /** Пульс применения: объявлен до первого использования (TDZ в ESM). */
+  let heartbeatTimer = null;
   diagState.applyCount += 1;
   const applyRecord = { at: new Date().toISOString(), apply: diagState.applyCount, error: null };
   diagState.applies.push(applyRecord);
   if (diagState.applies.length > 10) diagState.applies.shift();
   diag({ config: { boards: config?.boards ?? null, roots: config?.roots ?? null }, events: [], boards: [] });
+  // Пульс: если процесс жив, а apply «завис»/не дошёл — видно по heartbeatAt.
+  heartbeatTimer = setInterval(() => {
+    if (disposed) return;
+    diag({ heartbeatAt: new Date().toISOString() });
+  }, 20000);
   try {
     const boards = Array.isArray(config?.boards) ? config.boards : [];
     const configuredRoles = config?.roles && typeof config.roles === "object" ? config.roles : {};
@@ -565,6 +605,10 @@ export function apply(ctx, config = {}) {
       if (channelProbe !== null) {
         clearTimeout(channelProbe);
         channelProbe = null;
+      }
+      if (heartbeatTimer !== null) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
       }
 
       // 3. Снимаем службу канала. cordis снимает службу вместе с файбером
