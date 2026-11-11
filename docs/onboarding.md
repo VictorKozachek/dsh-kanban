@@ -8,6 +8,8 @@ The steps were verified on a clean DSH profile and on a separate test project.
 > (`AGENTS.md`, `bin/task-*`, `.kanban/`) lives in **your project**: the agent
 > reads it from its working directory.
 
+![How the board works: a card moves from backlog to merge](dsh-kanban/docs/onboarding-demo.gif)
+
 ## Requirements
 
 - DeepSeek Harness **0.2.1-rc.3+** (desktop app or `dsh web`);
