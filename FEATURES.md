@@ -138,10 +138,12 @@ against one board without chatting with each other.
   verified on the channel side; child processes are cancelled on unload.
 - Auto-resume of sessions interrupted by an app restart (issue #4): open-turn
   detection in the session log + a queued prompt-return; only on cold start.
+- Stale-card watchdog (issue #4): reminds the role or escalates to the dispatcher
+  when a card sits too long; one notice per card version.
 
 ## 6. Tests, mockups, documentation
 
-- **15 test files** plus `bin/test-scripts.sh`: **518 checks** in `bin/test.sh` —
+- **16 test files** plus `bin/test-scripts.sh`: **523 checks** in `bin/test.sh` —
   browserless rendering, card parser, worktree copy merging, notices, worktree
   observation, the command channel, dispose/shutdown, child boards overview
   (service and tab), scripts, locales. There is also a separate slow harness for
@@ -175,7 +177,7 @@ against one board without chatting with each other.
 
 48 tasks driven through the board during development, ~4,300 lines of
 plugin code, ~5,100 lines of tests,
-21 scripts, 518 checks in the suite (all green).
+21 scripts, 523 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
 

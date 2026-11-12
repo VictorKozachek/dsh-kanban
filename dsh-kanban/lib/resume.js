@@ -35,7 +35,7 @@ export function resumeSettings(config = {}) {
 }
 
 /** Разовый индекс логов сессий: `uuid → путь к session.v4.jsonl.zstd`. */
-function sessionLogIndex(home) {
+export function sessionLogIndex(home) {
   const index = new Map();
   const sessions = path.join(home, "sessions");
   let projects;

@@ -67,6 +67,7 @@ import { registerChildrenService } from "./children.js";
 import { registerRolePresets } from "./presets.js";
 import { isIgnoredPath, isSessionId, pickBoardRoot } from "./watcher-core.js";
 import { resumeInterruptedSessions, resumeSettings } from "./resume.js";
+import { runStaleWatchdog, staleSettings } from "./stale.js";
 
 // ---------------------------------------------------------------------------
 // Диагностика сторожа (issue #2): что видит host-половина и почему не доставляет
@@ -1257,6 +1258,26 @@ export function apply(ctx, config = {}) {
         }
       }
     });
+
+    // Stale-watchdog (issue #4): карточка стоит, роль не двигает — напоминание/эскалация.
+    if (staleSettings(config).enabled && !disposed) {
+      const runStale = () => {
+        if (disposed) return;
+        void runStaleWatchdog(ctx, {
+          boards: watchedBoards(),
+          config,
+          deliver,
+          diagEvent,
+          log: (level, message) => log(ctx, level, message),
+          disposed: () => disposed,
+        }).catch((error) => {
+          diagEvent({ step: "stale-scan-failed", error: String(error?.message ?? error) });
+          log(ctx, "warn", `stale-watchdog не сработал: ${error?.message ?? error}`);
+        });
+      };
+      timers.add(setTimeout(runStale, 5000));
+      timers.add(setInterval(runStale, 10 * 60 * 1000));
+    }
 
     // Авто-возврат прерванных сессий (issue #4): не блокирует apply, ошибки — в diag.
     // Холодный старт = молодой Host-процесс. HMR-перезагрузка модуля
