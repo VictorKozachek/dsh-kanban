@@ -27,7 +27,9 @@ export function resumeSettings(config = {}) {
   return {
     enabled: raw.enabled !== false,
     maxAgeHours: number(raw.maxAgeHours, 12),
-    minAgeSeconds: number(raw.minAgeSeconds, 60),
+    // На холодном старте свежесть не мешает: HMR-перезагрузку отсекает uptime
+    // процесса, поэтому по умолчанию будим и ход, оборванный секунды назад.
+    minAgeSeconds: Number.isFinite(raw.minAgeSeconds) && raw.minAgeSeconds >= 0 ? Number(raw.minAgeSeconds) : 0,
     maxSessions: Math.floor(number(raw.maxSessions, 5)),
   };
 }
