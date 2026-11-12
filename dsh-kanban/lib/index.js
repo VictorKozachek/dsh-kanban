@@ -66,6 +66,7 @@ import {
 import { registerChildrenService } from "./children.js";
 import { registerRolePresets } from "./presets.js";
 import { isIgnoredPath, isSessionId, pickBoardRoot } from "./watcher-core.js";
+import { resumeInterruptedSessions, resumeSettings } from "./resume.js";
 
 // ---------------------------------------------------------------------------
 // Диагностика сторожа (issue #2): что видит host-половина и почему не доставляет
@@ -1256,6 +1257,23 @@ export function apply(ctx, config = {}) {
         }
       }
     });
+
+    // Авто-возврат прерванных сессий (issue #4): не блокирует apply, ошибки — в diag.
+    // Холодный старт = молодой Host-процесс. HMR-перезагрузка модуля
+    // пересоздаёт diagState (applyCount снова 1), но процесс живёт давно.
+    const coldStart = (process.uptime?.() ?? 0) < 120;
+    if (resumeSettings(config).enabled && !disposed && coldStart) {
+      void resumeInterruptedSessions(ctx, {
+        boards: watchedBoards(),
+        config,
+        disposed: () => disposed,
+        log: (level, message) => log(ctx, level, message),
+        diagEvent,
+      }).catch((error) => {
+        diagEvent({ step: "resume-scan-failed", error: String(error?.message ?? error) });
+        log(ctx, "warn", `авто-возврат сессий не сработал: ${error?.message ?? error}`);
+      });
+    }
 
     applyRecord.boards = watchedBoards().length;
     applyRecord.watchers = watchers.length;

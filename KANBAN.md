@@ -28,6 +28,9 @@
 | `dsh-kanban/test/parse.test.mjs` | Тесты логики: парсер карточек, слияние с worktree |
 | `dsh-kanban/test/render.test.mjs` | Тест рендера: контекст, колонки, карточки, зачёркивание в `merged`, панель деталей (открытие, переключение, закрытие) |
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
+| `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
+| `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
+| `dsh-kanban/test/resume.test.mjs` | Тесты авто-возврата: окно возраста, дедуп, выключение, ошибка prompt |
 | `dsh-kanban/test/doctor.test.mjs` | Тесты `bin/doctor`: успешный проект и пустой (код 2) |
 | `dsh-kanban/test/delivery.test.mjs` | Тесты доставки наряда с поддельным сервисом сессий |
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
