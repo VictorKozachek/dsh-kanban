@@ -220,6 +220,85 @@ if (( FORCE == 0 )) && [[ -n "$OWNER" ]]; then
   fi
 fi
 
+# ── Замок карточки/worktree (issue #4) ───────────────────────────────────────
+# Два писателя в одном worktree затирают файлы друг друга. Замок берётся при
+# переходе в in-progress и снимается при любом уходе из него. Хозяин замка
+# продлевает heartbeat каждым вызовом; просроченный замок (TTL) или замок
+# мёртвой сессии можно перехватить с предупреждением, живой — только --force.
+LOCK_DIR="$ROOT/.kanban/.locks"
+LOCK_FILE="$LOCK_DIR/$id.json"
+LOCK_TTL_MINUTES="${KANBAN_LOCK_TTL_MINUTES:-720}"
+
+lock_fields() {
+  # Печатает: sessionId<TAB>heartbeat_ms (пусто — замка нет/битый).
+  python3 - "$LOCK_FILE" <<'PY'
+import json
+import sys
+
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+session = str(value.get("sessionId") or "")
+heartbeat = str(value.get("heartbeat") or "")
+print(f"{session}\t{heartbeat}")
+PY
+}
+
+session_alive() {
+  local uuid="${1#session-}"
+  local dir
+  for dir in "$DSH_HOME"/sessions/*/"$uuid" "$DSH_HOME"/sessions/*/"session-$uuid"; do
+    [[ -d "$dir" ]] && return 0
+  done
+  return 1
+}
+
+write_lock() {
+  mkdir -p "$LOCK_DIR"
+  python3 - "$LOCK_FILE" "$caller" "$ROOT" <<'PY'
+import json
+import sys
+import time
+
+path, session, worktree = sys.argv[1], sys.argv[2], sys.argv[3]
+now = int(time.time() * 1000)
+value = {"sessionId": session, "worktree": worktree, "since": now, "heartbeat": now}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(value, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+}
+
+if [[ "$status" == "in-progress" ]]; then
+  caller="${caller:-$(field_of owner)}"
+  if [[ -f "$LOCK_FILE" ]]; then
+    IFS=$'\t' read -r lock_holder lock_beat < <(lock_fields)
+    if [[ -n "$lock_holder" && "$lock_holder" != "$caller" ]]; then
+      now_ms="$(python3 -c 'import time; print(int(time.time()*1000))')"
+      fresh=0
+      if [[ -n "$lock_beat" ]] && (( now_ms - lock_beat < LOCK_TTL_MINUTES * 60 * 1000 )); then
+        fresh=1
+      fi
+      dead=0
+      session_alive "$lock_holder" || dead=1
+      if (( FORCE == 0 && fresh == 1 && dead == 0 )); then
+        echo "карточку $id держит $lock_holder (worktree $ROOT): два писателя в одном worktree запрещены" >&2
+        echo "осознанный обход: --force (только если уверены, что прежний писатель остановлен)" >&2
+        exit 3
+      fi
+      if (( FORCE == 0 )); then
+        echo "замок карточки $id просрочен или его сессия мертва — перехватываю" >&2
+      fi
+    fi
+  fi
+  write_lock
+  echo "замок задачи $id: $caller (worktree $ROOT)" >&2
+else
+  # Ушли из in-progress — замок больше не нужен.
+  rm -f "$LOCK_FILE"
+fi
+
 # Значение для YAML: простое — как есть, иначе в кавычках.
 yaml_value() {
   local value="$1"

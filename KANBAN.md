@@ -31,6 +31,7 @@
 | `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
 | `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
 | `dsh-kanban/lib/stale.js` | Stale-watchdog: стоящие карточки, проверка сессии по логу, напоминание/эскалация |
+| `bin/test-locks.sh` | Тесты замка карточки/worktree: второй писатель, --force, TTL/мертвец, снятие |
 | `dsh-kanban/test/stale.test.mjs` | Тесты stale-watchdog: мёртвая/закрытая/работающая сессия, свежая карточка, выключение |
 | `dsh-kanban/test/resume.test.mjs` | Тесты авто-возврата: окно возраста, дедуп, выключение, ошибка prompt |
 | `dsh-kanban/test/doctor.test.mjs` | Тесты `bin/doctor`: успешный проект и пустой (код 2) |
@@ -881,6 +882,23 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 4. Опционально — доска не табом, а полноширинной панелью: слот `main` плюс
    иконка в `sidebar.panellist` с тем же id (тогда доска занимает центр, а не
    правую колонку).
+
+### Замок карточки и worktree (issue #4)
+
+Два писателя в одном worktree затирают файлы друг друга. `bin/task-move.sh`
+берёт замок при переходе в `in-progress`:
+
+- `.kanban/.locks/<id>.json` — `sessionId`, `worktree`, `since`, `heartbeat`;
+- второй писатель получает отказ: «карточку держит <session>», карточка не
+  двигается; осознанный обход — `--force`;
+- уход из `in-progress` (в ревью/тест/blocked/…) снимает замок;
+- просроченный замок (TTL, `KANBAN_LOCK_TTL_MINUTES`, по умолчанию 720 мин) или
+  замок мёртвой сессии перехватывается с предупреждением, без `--force`;
+- в выводе видно «замок задачи <id>: <session> (worktree …)» — это же уходит в
+  лог сессии.
+
+Замок — дополнение к проверке `owner`, а не замена: `owner` отвечает за выдачу,
+замок — за то, что в worktree в один момент пишет одна сессия.
 
 ## Диагностика сторожа
 

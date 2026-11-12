@@ -37,6 +37,7 @@ echo "== рендер доски (регистрация в контексте, 
 "$NODE" "$ROOT/dsh-kanban/test/stale.test.mjs"
 
 bash "$ROOT/bin/test-onboarding.sh"
+bash "$ROOT/bin/test-locks.sh"
 
 echo "== макет: проверки painter'а (высота карточки и предел чипа владельца)"
 if command -v python3 >/dev/null 2>&1; then
