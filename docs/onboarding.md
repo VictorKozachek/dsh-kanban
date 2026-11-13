@@ -74,8 +74,9 @@ One command scaffolds everything the agents and scripts need:
 ```
 
 It copies `bin/` (tasks, board, doctor), `AGENTS.md`, the card format,
-`.kanban/board.json`, the `.gitignore` block and
-`dsh-kanban/lib/watcher-core.js` (used by `board-status`). Existing files are not
+`.kanban/board.json`, the `.gitignore` block,
+`dsh-kanban/lib/watcher-core.js` (used by `board-status`) and the `write-tests` /
+`review-compat` skills into `.agents/skills/`. Existing files are not
 overwritten; `--print` shows the plan, `--force` overwrites.
 
 Check:

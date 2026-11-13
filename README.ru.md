@@ -208,7 +208,7 @@ config:
 **Проверить установку:**
 
 ```bash
-bin/test.sh                              # весь набор (535 проверок), сеть не нужна
+bin/test.sh                              # весь набор (539 проверок), сеть не нужна
 bin/node.sh bin/host-shutdown-check.mjs  # реальный graceful shutdown Host-процесса (4 сценария)
 ```
 
@@ -297,7 +297,7 @@ bin/node.sh bin/host-shutdown-check.mjs  # реальный graceful shutdown Ho
 ## Требования и проверки
 
 - DSH `0.2.1-rc.3`, macOS (bash 3.2), git; node берётся из DSH через `bin/node.sh`.
-- `bin/test.sh` — 535 проверок без сети: разбор карточек, слияние worktree-копий,
+- `bin/test.sh` — 539 проверок без сети: разбор карточек, слияние worktree-копий,
   планирование нарядов, рендер клиента без браузера, канал асайна, дочерние доски,
   самолечение пресетов, graceful shutdown, скрипты и локали.
 - `bin/node.sh bin/host-shutdown-check.mjs` — поднимает настоящий Host-процесс и проверяет,

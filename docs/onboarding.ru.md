@@ -72,8 +72,8 @@ cat /tmp/dsh-kanban-watch.diag.json
 ```
 
 Она копирует `bin/` (задачи, доска, doctor), `AGENTS.md`, формат карточек,
-`.kanban/board.json`, `.gitignore`-блок и `dsh-kanban/lib/watcher-core.js`
-(нужен `board-status`). Существующие файлы не перезаписываются; `--print`
+`.kanban/board.json`, `.gitignore`-блок, `dsh-kanban/lib/watcher-core.js`
+(нужен `board-status`) и скилы `write-tests`/`review-compat` в `.agents/skills/`. Существующие файлы не перезаписываются; `--print`
 показывает план, `--force` перезаписывает.
 
 Проверка:

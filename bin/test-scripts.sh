@@ -1934,6 +1934,16 @@ if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard.patc
   else
     fail "нет персоны бизнес-аналитика"
   fi
+  if grep -q "write-tests" "$WORK/role-presets.patch.yml"; then
+    pass "исполнитель ссылается на скил write-tests"
+  else
+    fail "исполнитель не ссылается на write-tests"
+  fi
+  if grep -q "review-compat" "$WORK/role-presets.patch.yml"; then
+    pass "ревьювер ссылается на скил review-compat"
+  else
+    fail "ревьювер не ссылается на review-compat"
+  fi
   if grep -q '!!js' "$WORK/role-presets.patch.yml"; then
     pass "js-условия шаблона сохранены"
   else

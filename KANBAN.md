@@ -50,6 +50,7 @@
 | `FEATURES.md` | То же на английском (English feature list) |
 | `.agents/skills/kanban/SKILL.md` | Скил: как взять задачу и сдать её на код-ревью |
 | `.agents/skills/commit/SKILL.md` | Скил: правило сообщения коммита `[{SHORT_BRANCH_NAME}] Message` |
+| `.agents/skills/{write-tests,review-compat}/SKILL.md` | Скилы проекта: обязательные тесты у исполнителя и проверка совместимости tools/source kind у ревьювера |
 | `agent-presets/{dispatcher,worker,reviewer,verifier,analyst}/` | Заготовки пресетов агентов (аналитик — не роль доски) |
 | `bin/task-new.sh` | Завести задачу: worktree + ветка + карточка внутри ветки; `--backlog` — сразу в бэклог, `--spec NNN` — ссылка на спецификацию |
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |

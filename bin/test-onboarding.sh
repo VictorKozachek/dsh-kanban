@@ -40,7 +40,8 @@ fi
 
 for file in bin/task-new.sh bin/task-move.sh bin/task-commit.sh bin/board-status.sh \
   bin/node.sh bin/doctor.sh AGENTS.md .kanban/tasks/README.md \
-  dsh-kanban/lib/watcher-core.js .kanban/board.json; do
+  dsh-kanban/lib/watcher-core.js .kanban/board.json \
+  .agents/skills/write-tests/SKILL.md .agents/skills/review-compat/SKILL.md; do
   if [[ -f "$TARGET/$file" ]]; then ok "скопирован $file"; else bad "скопирован $file"; fi
 done
 

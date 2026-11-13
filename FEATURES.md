@@ -146,7 +146,7 @@ against one board without chatting with each other.
 
 ## 6. Tests, mockups, documentation
 
-- **16 test files** plus `bin/test-scripts.sh`: **535 checks** in `bin/test.sh` —
+- **16 test files** plus `bin/test-scripts.sh`: **539 checks** in `bin/test.sh` —
   browserless rendering, card parser, worktree copy merging, notices, worktree
   observation, the command channel, dispose/shutdown, child boards overview
   (service and tab), scripts, locales. There is also a separate slow harness for
@@ -180,7 +180,7 @@ against one board without chatting with each other.
 
 48 tasks driven through the board during development, ~4,300 lines of
 plugin code, ~5,100 lines of tests,
-21 scripts, 535 checks in the suite (all green).
+21 scripts, 539 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
 
