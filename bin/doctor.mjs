@@ -217,6 +217,26 @@ if (!diag) {
   }
 }
 
+/* --- 7b. Что DSH считает активным при закрытии (issue #081) ---------------- */
+if (diag.host && diag.host.available) {
+  const agents = Array.isArray(diag.host.agents) ? diag.host.agents : [];
+  const jobs = Array.isArray(diag.host.jobs) ? diag.host.jobs : [];
+  if (agents.length === 0 && jobs.length === 0) {
+    add("ok", "активные задачи", "DSH не видит, что прерывать при закрытии");
+  } else {
+    const parts = [
+      ...agents.map((agent) => `сессия ${agent.id} (${agent.status}, очередь ${agent.nextTurn}/${agent.nextStep})`),
+      ...jobs.map((job) => `job ${job.jobId} (${job.kind}, ${job.status})`),
+    ];
+    add(
+      "warn",
+      "активные задачи",
+      `DSH считает активными: ${parts.join("; ")}`,
+      "если сессии не работают — это фантомная активность (issue #081); смотрите host в диагностике",
+    );
+  }
+}
+
 /* --- 8. Карта ролей --------------------------------------------------------- */
 const rolesFile = path.join(project, ".kanban", ".watcher-roles.json");
 const roles = exists(rolesFile) ? readJson(rolesFile) : null;

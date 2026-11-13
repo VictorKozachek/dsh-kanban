@@ -180,6 +180,56 @@ function probeCardChannel(ctx) {
   }
 }
 
+/**
+ * Снимок задач Host-процесса, по которым DSH решает «есть что прерывать» при
+ * закрытии (issue #081). Это НЕ карточки и не сессии из логов: `activeTasks` в
+ * quit-inspection считается по live-агентам (`agents.list()`), их inbox-очередям
+ * и jobs со статусом running/stopping. Если сессия «не работает», а закрытие
+ * предупреждает — здесь будет видно, кто именно держит активность.
+ */
+function hostTaskSnapshot(ctx) {
+  const result = { available: false, agents: [], jobs: [] };
+  try {
+    const agents = ctx.get?.("agents");
+    if (!agents || typeof agents.list !== "function") return result;
+    const live = agents.list() ?? [];
+    result.available = true;
+    for (const agent of live) {
+      const nextTurn = agent?.inbox?.nextTurn?.length ?? 0;
+      const nextStep = agent?.inbox?.nextStep?.length ?? 0;
+      if (agent?.status === "running" || nextTurn > 0 || nextStep > 0) {
+        result.agents.push({ id: agent?.id ?? null, status: agent?.status ?? null, nextTurn, nextStep });
+      }
+    }
+    const jobs = ctx.get?.("jobs");
+    if (jobs && typeof jobs.list === "function") {
+      const seen = new Set();
+      for (const agent of [void 0, ...live]) {
+        try {
+          for (const job of jobs.list(agent?.id) ?? []) {
+            if (job?.status !== "running" && job?.status !== "stopping") continue;
+            const key = String(job?.id ?? "");
+            if (key && seen.has(key)) continue;
+            if (key) seen.add(key);
+            result.jobs.push({
+              agentId: agent?.id ?? null,
+              jobId: job?.id ?? null,
+              kind: job?.kind ?? null,
+              status: job?.status ?? null,
+              label: String(job?.label ?? "").slice(0, 120),
+            });
+          }
+        } catch {
+          /* jobs может быть без конкретного агента */
+        }
+      }
+    }
+  } catch {
+    /* сервисы могут быть не готовы на момент apply */
+  }
+  return result;
+}
+
 /** Пауза после события файловой системы: карточка пишется одним коммитом. */
 const DEBOUNCE_MS = 400;
 
@@ -551,7 +601,8 @@ export function apply(ctx, config = {}) {
   const heartbeatMs = Number.isFinite(config?.heartbeatMs) && config.heartbeatMs > 0 ? Number(config.heartbeatMs) : 20000;
   heartbeatTimer = setInterval(() => {
     if (disposed) return;
-    diag({ heartbeatAt: new Date().toISOString() });
+    // issue #081: снимок того, что DSH считает активным при закрытии.
+    diag({ heartbeatAt: new Date().toISOString(), host: hostTaskSnapshot(ctx) });
   }, heartbeatMs);
   heartbeatTimer.unref?.();
   try {
@@ -1298,7 +1349,7 @@ export function apply(ctx, config = {}) {
 
     applyRecord.boards = watchedBoards().length;
     applyRecord.watchers = watchers.length;
-    diag({ applied: { at: new Date().toISOString(), watchers: watchers.length, boards: watchedBoards().length } });
+    diag({ applied: { at: new Date().toISOString(), watchers: watchers.length, boards: watchedBoards().length }, host: hostTaskSnapshot(ctx) });
     log(ctx, "info", `сторож доски: каталогов ${watchers.length}, ролей ${[...rolesByRoot.values()].reduce((n, item) => n + Object.keys(item).length, 0)}`);
   } catch (error) {
     if (heartbeatTimer !== null) {

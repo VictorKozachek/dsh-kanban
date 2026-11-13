@@ -912,7 +912,11 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 - `events[]` — тики, план нарядов (`announce`), доставки (`deliver-once` →
   `delivered`/`deliver-skipped-board`), таймауты (`deliver-timeout`,
   `cwd-timeout`) и отказы (`prompt-failed`, `deliver-permanent-failed`);
-- `heartbeatAt` — процесс плагина жив (обновляется каждые 20 с).
+- `heartbeatAt` — процесс плагина жив (обновляется каждые 20 с);
+- `host` — снимок того, что DSH считает активным при закрытии (issue #081):
+  `agents[]` (live-сессии со статусом `running` или непустой inbox-очередью) и
+  `jobs[]` (bash-задачи в статусе `running`/`stopping`). Если сессии «не
+  работают», а закрытие предупреждает — здесь видно, кто держит активность.
 
 Правила, которые объясняют большинство «наряд не пришёл»:
 
