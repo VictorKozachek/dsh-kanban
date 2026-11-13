@@ -96,7 +96,8 @@ git add -A && git commit -m "kanban: task protocol"
 2. Create a **`dispatcher`** session (orchestrator): New Session → preset
    `dispatcher`.
 3. In the same workspace create three more: **`worker`**, **`reviewer`**,
-   **`verifier`**.
+   **`verifier`**. Optional: **`analyst`** (business analyst) — interviews business,
+   maps processes and prepares specs; it receives no board notices.
 4. Open the **Kanban** tab (right sidebar → **+** → Kanban).
 
 The watcher binds roles automatically from preset selection and stores the map

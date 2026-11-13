@@ -1913,11 +1913,26 @@ printf '[]\n' > "$preset_home/profiles/demo/cordis.patch.yml"
 if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard.patch.yml" \
      --personas "$ROOT/agent-presets" --out "$WORK/role-presets.patch.yml" >"$WORK/out20" 2>&1; then
   rows=$(grep -c 'id: preset-' "$WORK/role-presets.patch.yml")
-  if [[ "$rows" == "4" ]]; then pass "сгенерированы строки четырёх ролей"; else fail "строк пресетов: $rows"; fi
+  if [[ "$rows" == "5" ]]; then pass "сгенерированы строки пяти ролей"; else fail "строк пресетов: $rows"; fi
   if grep -q "Ты исполнитель" "$WORK/role-presets.patch.yml"; then
     pass "персона роли попала в строку"
   else
     fail "в строке нет персоны роли"
+  fi
+  if grep -q "Тесты — обязательная часть работы" "$WORK/role-presets.patch.yml"; then
+    pass "у исполнителя требование писать тесты"
+  else
+    fail "в пересоне исполнителя нет требования тестов"
+  fi
+  if grep -q "Запусти тесты задачи" "$WORK/role-presets.patch.yml"; then
+    pass "ревьювер обязан запускать тесты"
+  else
+    fail "в пересоне ревьювера нет прогона тестов"
+  fi
+  if grep -q "Ты бизнес-аналитик" "$WORK/role-presets.patch.yml"; then
+    pass "персона бизнес-аналитика попала в строку"
+  else
+    fail "нет персоны бизнес-аналитика"
   fi
   if grep -q '!!js' "$WORK/role-presets.patch.yml"; then
     pass "js-условия шаблона сохранены"

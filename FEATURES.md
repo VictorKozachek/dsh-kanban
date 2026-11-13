@@ -81,7 +81,8 @@ against one board without chatting with each other.
   returns counters; a single board's failure lands in its `problems`/`missing`
   and does not fail the rest; limits are 200 boards and 2,000 cards, and there
   are no mutating arguments at all.
-- **Self-healing role presets** (issue #1): the four role definitions ship with
+- **Self-healing role presets** (issue #1): five definitions (four board roles plus a
+  business analyst) ship with
   the plugin (`dsh-kanban/presets/role-presets.json`) and are registered in the
   DSH preset registry on every start — updating or resetting the profile no
   longer drops the presets, and existing sessions (the preset id lives in the
@@ -145,7 +146,7 @@ against one board without chatting with each other.
 
 ## 6. Tests, mockups, documentation
 
-- **16 test files** plus `bin/test-scripts.sh`: **531 checks** in `bin/test.sh` —
+- **16 test files** plus `bin/test-scripts.sh`: **535 checks** in `bin/test.sh` —
   browserless rendering, card parser, worktree copy merging, notices, worktree
   observation, the command channel, dispose/shutdown, child boards overview
   (service and tab), scripts, locales. There is also a separate slow harness for
@@ -179,7 +180,7 @@ against one board without chatting with each other.
 
 48 tasks driven through the board during development, ~4,300 lines of
 plugin code, ~5,100 lines of tests,
-21 scripts, 531 checks in the suite (all green).
+21 scripts, 535 checks in the suite (all green).
 
 ## Roadmap ideas (v2)
 

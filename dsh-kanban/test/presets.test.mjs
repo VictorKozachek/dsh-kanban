@@ -75,7 +75,7 @@ check("артефакт лежит в пакете плагина и читае�
   assert.equal(path.isAbsolute(PRESETS_FILE), true);
 });
 
-check("четыре определения ролей со стабильными id и порядком", () => {
+check("пять определений ролей со стабильными id и порядком", () => {
   const definitions = JSON.parse(fs.readFileSync(PRESETS_FILE, "utf8"));
   assert.ok(Array.isArray(definitions), "артефакт должен быть массивом определений");
   assert.deepEqual(
@@ -85,6 +85,7 @@ check("четыре определения ролей со стабильным�
       ["worker", 11],
       ["reviewer", 12],
       ["verifier", 13],
+      ["analyst", 14],
     ],
   );
   assert.deepEqual(
@@ -92,6 +93,16 @@ check("четыре определения ролей со стабильным�
     ROLE_IDS,
     "ROLE_IDS должны совпадать с артефактом: id записаны в логах сессий",
   );
+});
+
+check("пресет analyst: бизнес-аналитик, не роль доски", () => {
+  const definitions = JSON.parse(fs.readFileSync(PRESETS_FILE, "utf8"));
+  const analyst = definitions.find((definition) => definition.id === "analyst");
+  assert.ok(analyst, "нет определения analyst");
+  assert.equal(analyst.order, 14);
+  assert.match(analyst.name, /аналит/i);
+  assert.ok(Array.isArray(analyst.plugins) && analyst.plugins.length > 0, "у analyst пустой plugins");
+  assert.ok(ROLE_IDS.includes("analyst"));
 });
 
 check("у каждого определения есть name, description и непустой plugins", () => {
@@ -129,7 +140,7 @@ check("YAML-тег !!js стал узлом __jsExpr, выражения сох�
 check("readRolePresets отдаёт определения и подсказку на битом файле", () => {
   const good = readRolePresets();
   assert.equal(good.ok, true);
-  assert.equal(good.definitions.length, 4);
+  assert.equal(good.definitions.length, 5);
   const broken = path.join(work, "broken.json");
   fs.writeFileSync(broken, "{ не json");
   const bad = readRolePresets(broken);
@@ -167,7 +178,7 @@ await checkAsync("dispose снимает определения в обратн�
   await result.dispose();
   assert.deepEqual(registry.calls.disposed, [...ROLE_IDS].reverse());
   await result.dispose();
-  assert.equal(registry.calls.disposed.length, 4, "повторный dispose снял что-то ещё");
+  assert.equal(registry.calls.disposed.length, 5, "повторный dispose снял что-то ещё");
 });
 
 await checkAsync("дубликат legacy-строки не рвёт регистрацию, остальные роли на месте", async () => {
@@ -175,12 +186,12 @@ await checkAsync("дубликат legacy-строки не рвёт регис�
   const logs = [];
   const result = await registerRolePresets({ agentPresets: registry, log: (level, message) => logs.push(`${level}: ${message}`) });
   assert.equal(result.ok, true, "дубликат не должен считаться сбоем");
-  assert.deepEqual(result.registered, ["dispatcher", "reviewer", "verifier"]);
+  assert.deepEqual(result.registered, ["dispatcher", "reviewer", "verifier", "analyst"]);
   assert.deepEqual(result.duplicates, ["worker"]);
   assert.deepEqual(result.failures, []);
   assert.ok(logs.some((line) => /worker.*дубликат/.test(line)), `нет предупреждения о дубликате: ${logs.join(" | ")}`);
   await result.dispose();
-  assert.deepEqual(registry.calls.disposed, ["verifier", "reviewer", "dispatcher"], "снимаются только свои определения");
+  assert.deepEqual(registry.calls.disposed, ["analyst", "verifier", "reviewer", "dispatcher"], "снимаются только свои определения");
 });
 
 await checkAsync("странная ошибка реестра фиксируется, но другие роли регистрируются", async () => {
@@ -189,7 +200,7 @@ await checkAsync("странная ошибка реестра фиксируе�
   const result = await registerRolePresets({ agentPresets: registry, log: (level, message) => logs.push(`${level}: ${message}`) });
   assert.equal(result.ok, false);
   assert.deepEqual(result.failures, ["reviewer"]);
-  assert.deepEqual(result.registered, ["dispatcher", "worker", "verifier"]);
+  assert.deepEqual(result.registered, ["dispatcher", "worker", "verifier", "analyst"]);
   assert.ok(logs.some((line) => /reviewer/.test(line) && /не зарегистрирован/.test(line)), logs.join(" | "));
 });
 

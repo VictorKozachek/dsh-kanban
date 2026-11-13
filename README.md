@@ -55,7 +55,8 @@ flowchart LR
 1. **Cards are files.** Any edit to a card — by an agent or by you — is picked up by the host
    half; copies of the same card in a task worktree are merged by the newest `updated`.
 2. **Roles are sessions.** You create ordinary DSH sessions and pick a **preset** when you
-   create them: `dispatcher`, `worker`, `reviewer`, `verifier`. The presets ship with the
+   create them: `dispatcher`, `worker`, `reviewer`, `verifier` (plus `analyst` for business
+   analysis — not a board role). The presets ship with the
    plugin and are registered on startup, so plugin updates cannot lose them. The watcher
    recognises a session's role automatically (from the preset selection event) and stores the
    role map in `.kanban/.watcher-roles.json`.
@@ -144,7 +145,8 @@ transition sends a watcher assignment to the role session.
 3. **Put the task protocol into your project** — `bin/kanban-init.sh <project>`; commit
    and run `bin/doctor.sh`.
 4. **Create the team** — one workspace, four sessions with presets `dispatcher`, `worker`,
-   `reviewer`, `verifier`; open the **Kanban** tab in the right sidebar.
+   `reviewer`, `verifier` (optional fifth: `analyst`); open the **Kanban** tab in the right
+   sidebar.
 5. **Create the first card** — `bin/task-new.sh "Fix the QR export"`, assign it to the worker
    (GUI or `bin/task-move.sh 001 todo --owner <session-id>`) and watch it move.
 
@@ -208,7 +210,7 @@ copies (e.g. `tmp/` clones) that would otherwise duplicate the same cards.
 **Verify the installation:**
 
 ```bash
-bin/test.sh                              # full suite (531 checks), no network needed
+bin/test.sh                              # full suite (535 checks), no network needed
 bin/node.sh bin/host-shutdown-check.mjs  # real Host graceful-shutdown harness (4 scenarios)
 ```
 
@@ -220,7 +222,9 @@ bin/node.sh bin/host-shutdown-check.mjs  # real Host graceful-shutdown harness (
    preset picker. This session runs the orchestrator role.
 3. **Create the other roles.** In the same workspace create three more sessions and pick
    **`worker`**, **`reviewer`** and **`verifier`** as presets. Titles are free; naming them
-   after their roles keeps the sidebar readable.
+   after their roles keeps the sidebar readable. Optional fifth preset — **`analyst`**
+   (business analyst): it talks to business people, maps processes and prepares specs; it is
+   not a board role and receives no notices.
 4. **Open the board.** Right sidebar → **+** → **Kanban**. The board reads the cards of the
    current workspace, so it appears as soon as the project has a `.kanban/tasks/` directory.
 5. **Check that the roles were captured.** The watcher binds each session to its role from the
@@ -294,7 +298,7 @@ with architecture, isolation details and troubleshooting is in [KANBAN.md](KANBA
 ## Requirements and verification
 
 - DSH `0.2.1-rc.3`, macOS (bash 3.2), git; node comes from DSH via `bin/node.sh`.
-- `bin/test.sh` — 531 checks, no network: card parsing, worktree merging, notice planning,
+- `bin/test.sh` — 535 checks, no network: card parsing, worktree merging, notice planning,
   client rendering without a browser, the assign channel, child boards, presets
   self-healing, graceful shutdown, scripts and locales.
 - `bin/node.sh bin/host-shutdown-check.mjs` — boots a real Host process and checks that the

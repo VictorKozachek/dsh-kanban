@@ -124,7 +124,7 @@ except ImportError:
         "(или системный python3 с PyYAML); без него собирается только YAML"
     )
 
-ROLES = [("dispatcher", 10), ("worker", 11), ("reviewer", 12), ("verifier", 13)]
+ROLES = [("dispatcher", 10), ("worker", 11), ("reviewer", 12), ("verifier", 13), ("analyst", 14)]
 PREFIX_LINE = re.compile(r"^(?P<indent> +)prefix: .*$", re.M)
 
 standard = Path(os.environ["STANDARD"])

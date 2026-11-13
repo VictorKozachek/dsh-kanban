@@ -46,7 +46,7 @@ export const PRESETS_FILE = path.join(PACKAGE_DIR, "presets", "role-presets.json
  * Стабильные id ролей. Они записаны в логах сессий, поэтому **переименовывать
  * нельзя** — только добавлять новые (правило релиза, спека 005).
  */
-export const ROLE_IDS = ["dispatcher", "worker", "reviewer", "verifier"];
+export const ROLE_IDS = ["dispatcher", "worker", "reviewer", "verifier", "analyst"];
 
 /** Предел текста диагностики, чтобы лог не разрастался. */
 const MAX_MESSAGE = 400;
