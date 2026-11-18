@@ -376,15 +376,30 @@ await check("prompt, который не отвечает, уходит в pendi
   ctx.pick("dispose")();
 });
 
-await check("зависший cwd сессии не отправляет prompt и пишет pending", async () => {
+await check("cwd-таймаут не блокирует prompt (issue #5)", async () => {
   const board = makeBoard([["021", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
   const calls = [];
   const ctx = makeCtx(calls);
   ctx.get = (name) => (name === "sessionQuery" ? { observeSession: () => new Promise(() => {}) } : undefined);
   apply(ctx, { boards: [board], roles: { reviewer: "session-1a7e1a7e-0000-4000-8000-000000000001" }, catchUpMs: 10, debounceMs: 10, cwdTimeoutMs: 20 });
+  assert.ok(await waitFor(() => calls.length > 0), "prompt не отправлен после таймаута cwd");
   const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
-  assert.ok(await waitFor(() => fs.existsSync(pendingFile)), "pending не появился после таймаута cwd");
-  assert.equal(calls.length, 0, "prompt вызван без подтверждённого cwd");
+  const pending = fs.existsSync(pendingFile) ? JSON.parse(fs.readFileSync(pendingFile, "utf8")) : {};
+  assert.deepEqual(Object.keys(pending), [], "наряд осел в pending, хотя prompt ушёл");
+  ctx.pick("dispose")();
+});
+
+await check("pending хранит причину и число попыток", async () => {
+  const board = makeBoard([["022", "in-review", { owner: "session-6af8ff46-f3e7-4640-8a2d-045543fbc030" }]]);
+  const calls = [];
+  const ctx = makeCtx(calls, "agent busy, try later");
+  apply(ctx, { boards: [board], roles: { reviewer: "session-1a7e1a7e-0000-4000-8000-000000000001" }, catchUpMs: 10, debounceMs: 10 });
+  const pendingFile = path.join(board, ".kanban", ".watcher-pending.json");
+  assert.ok(await waitFor(() => fs.existsSync(pendingFile)), "pending не появился");
+  const pending = JSON.parse(fs.readFileSync(pendingFile, "utf8"));
+  const entry = Object.values(pending)[0];
+  assert.ok(entry.attempts >= 1, "нет счётчика попыток");
+  assert.match(String(entry.lastError), /agent busy/);
   ctx.pick("dispose")();
 });
 

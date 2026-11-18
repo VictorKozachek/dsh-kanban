@@ -244,7 +244,7 @@ const DELIVERY_CONCURRENCY = 3;
 const DELIVER_TIMEOUT_MS = 15_000;
 
 /** Предел ожидания cwd сессии (см. sessionCwdFromContext). */
-const CWD_TIMEOUT_MS = 5_000;
+const CWD_TIMEOUT_MS = 2_000;
 
 /** Лог плагина: у cordis логгер может быть и функцией, и объектом. */
 function log(ctx, level, message) {
@@ -905,11 +905,11 @@ export function apply(ctx, config = {}) {
           // повтор после следующего старта/события (issue #3).
           diagEvent({ step: "deliver-timeout", card: item.cardId ?? null, session: item.sessionId ?? null, timeoutMs: deliverTimeoutMs });
           log(ctx, "warn", `наряд по #${item.cardId} не доставлен за ${deliverTimeoutMs} мс: ${item.sessionId}`);
-          return { ok: false, permanent: false };
+          return { ok: false, permanent: false, error: `timeout ${deliverTimeoutMs} ms` };
         }
         if (controller.signal.aborted || disposed) {
           log(ctx, "info", `наряд по #${item.cardId} (${item.kind}) отменён: плагин выгружается`);
-          return { ok: false, permanent: false };
+          return { ok: false, permanent: false, error: "disposed" };
         }
         // Сессия-получатель может быть недоступна навсегда (удалена, архивная,
         // принадлежит subagent-роутингу): повторять такой наряд бессмысленно,
@@ -918,7 +918,7 @@ export function apply(ctx, config = {}) {
         const permanent = /subagent|session\/not-found|not found|agent-preset\/locked/i.test(text);
         diagEvent({ step: "prompt-failed", permanent, card: item.cardId ?? null, session: item.sessionId ?? null, error: String(error?.stack ?? error?.message ?? error) });
         log(ctx, "warn", `наряд по #${item.cardId} не доставлен (${item.sessionId}): ${error?.message ?? error}`);
-        return { ok: false, permanent };
+        return { ok: false, permanent, error: String(error?.message ?? error) };
       } finally {
         clearTimeout(timer);
         controllers.delete(controller);
@@ -960,7 +960,8 @@ export function apply(ctx, config = {}) {
       // один и тот же наряд дважды.
       const inFlight = new Set();
       /** Запомнить недostавленный наряд: повторим на старте/следующем событии. */
-      const rememberPending = (key, item) => {
+      const rememberPending = (key, item, reason = "") => {
+        const previous = pending[key];
         pending[key] = {
           cardId: item.cardId,
           status: item.status,
@@ -968,7 +969,10 @@ export function apply(ctx, config = {}) {
           text: item.text,
           // Рабочее дерево — часть текста наряда, поэтому едет вместе с ним.
           worktree: item.worktree ?? "",
-          at: new Date().toISOString(),
+          at: previous?.at ?? new Date().toISOString(),
+          lastAttemptAt: new Date().toISOString(),
+          attempts: Number(previous?.attempts ?? 0) + 1,
+          lastError: reason || previous?.lastError || "",
         };
         saveState(pendingFile, pending);
       };
@@ -994,12 +998,15 @@ export function apply(ctx, config = {}) {
             }
             if (disposed) return;
             if (cwdFailed) {
-              diagEvent({ board: root, step: "cwd-timeout", card: item.cardId ?? null, session: item.sessionId ?? null, timeoutMs: cwdTimeoutMs });
-              log(ctx, "warn", `наряд по #${item.cardId} отложен: cwd сессии ${item.sessionId} не получен за ${cwdTimeoutMs} мс`);
-              rememberPending(key, item);
-              return;
+              // Холодная/долго простаивавшая сессия может не отдать cwd за
+              // отведённое время. Граница доски — страховка, а не условие
+              // доставки: роль уже привязана к этой доске, поэтому шлём prompt
+              // без проверки cwd (issue #5).
+              diagEvent({ board: root, step: "cwd-timeout", card: item.cardId ?? null, session: item.sessionId ?? null, timeoutMs: cwdTimeoutMs, deliveredAnyway: true });
+              log(ctx, "warn", `cwd сессии ${item.sessionId} не получен за ${cwdTimeoutMs} мс — наряд по #${item.cardId} отправляю без проверки границы доски`);
+            } else {
+              diagEvent({ board: root, step: "deliver-cwd", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
             }
-            diagEvent({ board: root, step: "deliver-cwd", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
             if (cwd !== null && boardRootOf(cwd) !== path.resolve(root)) {
               diagEvent({ board: root, step: "deliver-skipped-board", card: item.cardId ?? null, session: item.sessionId ?? null, cwd });
               log(ctx, "warn", `наряд по #${item.cardId} пропущен: сессия ${item.sessionId} вне доски ${root}`);
@@ -1021,9 +1028,10 @@ export function apply(ctx, config = {}) {
               return;
             }
             if (!accepted) {
-              // Наряд не дошёл — запоминаем, чтобы повторить при следующем старте.
-              // Иначе возврат владельцу теряется молча, если его сессию пересоздали.
-              rememberPending(key, item);
+              // Наряд не дошёл — запоминаем причину и пробуем ещё раз при
+              // следующем старте/событии; после нескольких попыток это видно
+              // в pending (attempts/lastError), а не молчит (issue #5).
+              rememberPending(key, item, result.error || "delivery failed");
               return;
             }
             state[key] = new Date().toISOString();
