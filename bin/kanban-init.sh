@@ -110,7 +110,7 @@ else
     {
       printf '\n# Доска kanban: служебное состояние и рабочие деревья задач.\n'
       printf '.kanban/.watcher-state.json\n.kanban/.watcher-roles.json\n'
-      printf '.kanban/.watcher-pending.json\n.kanban/.watcher-resume.json\n.kanban/.watcher-stale.json\n.kanban/.locks/\n.kanban/.workers.json\n.kanban/worktrees.json\n'
+      printf '.kanban/.watcher-pending.json\n.kanban/.watcher-resume.json\n.kanban/.watcher-stale.json\n.kanban/.locks/\n.kanban/.sync/\n.kanban/.workers.json\n.kanban/worktrees.json\n'
       printf 'worktrees/\n.worktrees/\n'
     } >> "$TARGET/.gitignore"
     if [[ ! -s "$TARGET/.gitignore" ]]; then :; fi

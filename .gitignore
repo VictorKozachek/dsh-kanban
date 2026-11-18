@@ -5,6 +5,7 @@
 .kanban/.watcher-resume.json
 .kanban/.watcher-stale.json
 .kanban/.locks/
+.kanban/.sync/
 .kanban/.workers.json
 .kanban/worktrees.json
 

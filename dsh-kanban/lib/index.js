@@ -68,6 +68,7 @@ import { registerRolePresets } from "./presets.js";
 import { isIgnoredPath, isSessionId, pickBoardRoot } from "./watcher-core.js";
 import { resumeInterruptedSessions, resumeSettings } from "./resume.js";
 import { runStaleWatchdog, staleSettings } from "./stale.js";
+import { syncOnce, syncSettings } from "./sync.js";
 
 // ---------------------------------------------------------------------------
 // Диагностика сторожа (issue #2): что видит host-половина и почему не доставляет
@@ -1309,6 +1310,35 @@ export function apply(ctx, config = {}) {
         }
       }
     });
+
+    // Синхронизация с kanban-hub (M1, #072): локальные файлы ↔ общий хаб.
+    if (syncSettings(config).enabled && !disposed) {
+      const syncCfg = syncSettings(config);
+      const firstBoard = boards.find((entry) => entry !== null && entry !== undefined);
+      const syncBoard = syncCfg.board ?? (firstBoard ? path.resolve(String(firstBoard && typeof firstBoard === "object" ? firstBoard.path : firstBoard)) : null);
+      if (syncBoard) {
+        const runSync = () => {
+          if (disposed) return;
+          void syncOnce({
+            board: syncBoard,
+            settings: syncCfg,
+            log: (level, message) => log(ctx, level, message),
+          })
+            .then((summary) => {
+              if (summary.pushed > 0 || summary.conflicts > 0 || summary.errors > 0) {
+                diagEvent({ step: "sync-run", board: syncBoard, ...summary });
+              }
+            })
+            .catch((error) => {
+              diagEvent({ step: "sync-failed", board: syncBoard, error: String(error?.message ?? error) });
+            });
+        };
+        timers.add(setTimeout(runSync, 5000));
+        timers.add(setInterval(runSync, syncCfg.intervalMs));
+      } else {
+        log(ctx, "warn", "sync включён, но не задан board (ни в sync.board, ни в boards)");
+      }
+    }
 
     // Stale-watchdog (issue #4): карточка стоит, роль не двигает — напоминание/эскалация.
     if (staleSettings(config).enabled && !disposed) {

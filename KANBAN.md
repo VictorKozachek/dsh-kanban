@@ -30,6 +30,9 @@
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
 | `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
 | `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
+| `dsh-kanban/lib/sync.js` | Клиент синка с хабом: pull/push, claim/release, state/remote cache |
+| `bin/kanban-sync.sh`, `bin/kanban-sync.mjs` | Ручной проход синка и статус (--once/--status/--json) |
+| `dsh-kanban/test/sync.test.mjs` | Тесты синка на мок-хабе: создание/обновление, конфликты, офлайн, выключение |
 | `dsh-kanban/lib/stale.js` | Stale-watchdog: стоящие карточки, проверка сессии по логу, напоминание/эскалация |
 | `bin/test-locks.sh` | Тесты замка карточки/worktree: второй писатель, --force, TTL/мертвец, снятие |
 | `dsh-kanban/test/stale.test.mjs` | Тесты stale-watchdog: мёртвая/закрытая/работающая сессия, свежая карточка, выключение |
@@ -902,6 +905,42 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 
 Замок — дополнение к проверке `owner`, а не замена: `owner` отвечает за выдачу,
 замок — за то, что в worktree в один момент пишет одна сессия.
+
+### Синхронизация с хабом (M1, #072)
+
+Плагин умеет синхронизировать карточки с `kanban-hub` (M0, папка `hub/`):
+
+- локальные `.kanban/tasks/*.md` остаются правдой; хаб — общий обмен;
+- за проход: pull изменений после курсора → push локальных карточек с
+  `claim`/`upsert`/`release`; чужие карточки складываются в
+  `.kanban/.sync/remote.json` (read-only);
+- `state.json` хранит курсор и хэши; недоступный хаб не ломает проход —
+  карточка уйдёт в следующий раз;
+- чужой lease/устаревший `base_rev` → `409`, карточка не перезаписывается;
+- в диагностике — `sync-run`/`sync-failed`.
+
+Настройка (строка плагина, по умолчанию выключено):
+
+```yaml
+sync:
+  enabled: true
+  hubUrl: http://127.0.0.1:8787
+  project: demo
+  token: <project-token>
+  instanceId: alice-mbp
+  userId: alice
+  intervalMs: 30000
+  board: /Users/alice/projects/my-project   # необязательно; иначе первая доска
+```
+
+Вручную:
+
+```bash
+bin/kanban-sync.sh --once
+bin/kanban-sync.sh --status
+```
+
+Без `enabled` файловый режим работает как раньше.
 
 ## Диагностика сторожа
 
