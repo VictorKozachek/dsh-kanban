@@ -182,29 +182,41 @@ async function measureDispose(cycle) {
     "cleanup не зарегистрирован через ctx.effect: при shutdown cordis вызовет только его",
   );
   await sleep(60);
+  const cpuStarted = process.cpuUsage();
   const started = performance.now();
   unload(ctx);
   const elapsed = performance.now() - started;
+  const cpu = process.cpuUsage(cpuStarted);
   const closed = await waitFor(() => activeWatchers().length === 0, 5000);
   assert.ok(closed, `после dispose остались FSWatcher: ${activeWatchers()}`);
   const timersBack = await waitFor(() => activeTimers() <= TIMER_BASELINE, 5000);
   assert.ok(timersBack, `после dispose остались таймеры: ${activeTimers()} > ${TIMER_BASELINE}`);
   fs.rmSync(root, { recursive: true, force: true });
-  return elapsed;
+  return { elapsed, cpuMs: (cpu.user + cpu.system) / 1000 };
 }
 
-await check("30 досок: dispose закрывает все FSWatcher и укладывается в строгий бюджет (лучший из пяти)", async () => {
-  // Строгий порог, но без флейков: машина под тестами бывает загружена, поэтому
-  // меряем **лучший** из пяти независимых прогонов — это характеристика кода
-  // dispose, а не текущей загрузки CPU (наблюдали разброс 53…1500 мс на одном коде).
-  // Регрессию «в 3–5 раз медленнее» (300–900 мс вместо 150) такой порог ловит,
-  // а прежний 1000 мс — уже нет.
-  const timings = [];
-  for (let cycle = 0; cycle < 5; cycle += 1) timings.push(await measureDispose(cycle));
-  const best = Math.min(...timings);
+await check("30 досок: dispose закрывает все FSWatcher и укладывается в бюджет (лучший из пяти + CPU)", async () => {
+  // Wall-clock под нагрузкой меряет очередь планировщика, а не код: на машине с
+  // load average 100+ лучший из пяти давал 700–1300 мс при том же dispose.
+  // Поэтому под высокой нагрузкой wall-бюджет пропускаем (с явным сообщением),
+  // а строгость держим по CPU-времени процесса — регрессия «в 3–5 раз больше
+  // работы» видна и там.
+  const runs = [];
+  for (let cycle = 0; cycle < 5; cycle += 1) runs.push(await measureDispose(cycle));
+  const bestWall = Math.min(...runs.map((run) => run.elapsed));
+  const bestCpu = Math.min(...runs.map((run) => run.cpuMs));
+  const load = os.loadavg()[0];
+  if (load >= 30) {
+    console.log(`      (load ${load.toFixed(0)}: wall-бюджет пропущен, лучший ${bestWall.toFixed(1)} мс)`);
+  } else {
+    assert.ok(
+      bestWall < 250,
+      `лучший dispose ${bestWall.toFixed(1)} мс (бюджет 250); прогоны: ${runs.map((run) => run.elapsed.toFixed(1)).join(", ")}`,
+    );
+  }
   assert.ok(
-    best < 250,
-    `лучший dispose ${best.toFixed(1)} мс (бюджет 250); прогоны: ${timings.map((value) => value.toFixed(1)).join(", ")}`,
+    bestCpu < 150,
+    `лучший CPU dispose ${bestCpu.toFixed(1)} мс (бюджет 150); прогоны: ${runs.map((run) => run.cpuMs.toFixed(1)).join(", ")}`,
   );
 });
 

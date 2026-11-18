@@ -39,6 +39,33 @@ window.__ModuleLoader__.load({
     const WORKTREES_DIRS = ["worktrees", ".worktrees"];
     /** Период опроса: фид изменений не видит записи из bash и редактора. */
     const POLL_MS = 3000;
+    // Предел одного прохода загрузки доски: под нагрузкой Remote может
+    // задержаться, и тогда опрос не должен «зависать» навсегда (#081/UX).
+    const LOAD_TIMEOUT_MS = 8000;
+    // Параллельные чтения карточек: последовательный обход десятков файлов
+    // делал обновление доски медленным при живой работе сессий.
+    const IO_CONCURRENCY = 6;
+
+    /** Ограниченный параллелизм для асинхронных операций. */
+    async function mapLimit(items, limit, worker) {
+      const results = new Array(items.length);
+      let next = 0;
+      const runners = [];
+      for (let index = 0; index < Math.min(limit, items.length); index += 1) {
+        runners.push(
+          (async () => {
+            while (true) {
+              const current = next;
+              next += 1;
+              if (current >= items.length) return;
+              results[current] = await worker(items[current], current);
+            }
+          })()
+        );
+      }
+      await Promise.all(runners);
+      return results;
+    }
     /** Сколько строк карточки читать (front matter + тело задачи). */
     const MAX_LINES = 400;
 
@@ -340,18 +367,19 @@ window.__ModuleLoader__.load({
         return;
       }
       if (!listing || listing.ok !== true) return;
-      for (const entry of (listing.value && listing.value.entries) || []) {
-        if (!entry || entry.type !== "directory") continue;
+      const entries = ((listing.value && listing.value.entries) || []).filter(
+        (entry) => entry && entry.type === "directory" && String(entry.name || "") !== ""
+      );
+      await mapLimit(entries, 4, async (entry) => {
         const name = String(entry.name || "");
-        if (name === "") continue;
         const dir = worktreesDir + "/" + name;
         let tasks;
         try {
           tasks = await remote.workspaceFiles.list(sessionId, dir + "/" + TASKS_DIR, signal);
         } catch (error) {
-          continue;
+          return;
         }
-        if (!tasks || tasks.ok !== true) continue;
+        if (!tasks || tasks.ok !== true) return;
         for (const file of (tasks.value && tasks.value.entries) || []) {
           if (!file || file.type !== "file") continue;
           const file_name = String(file.name || "");
@@ -363,7 +391,7 @@ window.__ModuleLoader__.load({
           if (file_name.replace(/\.md$/i, "") !== name) continue;
           paths.push(dir + "/" + TASKS_DIR + "/" + file_name);
         }
-      }
+      });
     }
 
     /** Имя файла из абсолютного пути. */
@@ -422,21 +450,23 @@ window.__ModuleLoader__.load({
         files.sort();
         const cards = [];
         const problems = [];
-        for (const name of files) {
+        const readMain = await mapLimit(files, IO_CONCURRENCY, async (name) => {
           let result;
           try {
             result = await remote.workspaceFiles.read(sessionId, TASKS_DIR + "/" + name, { limit: MAX_LINES }, signal);
           } catch (error) {
-            problems.push(name + ": " + describeError(error));
-            continue;
+            return { problem: name + ": " + describeError(error) };
           }
           if (result && result.ok === true) {
             const card = parseCard(name, (result.value || {}).text);
             card.source = "main";
-            cards.push(card);
-          } else {
-            problems.push(name + ": " + describeError(result ? result.error : null));
+            return { card };
           }
+          return { problem: name + ": " + describeError(result ? result.error : null) };
+        });
+        for (const item of readMain) {
+          if (item.problem) problems.push(item.problem);
+          else if (item.card) cards.push(item.card);
         }
 
         // Открытые задачи живут в ветках (worktree). Находим их обходом
@@ -453,27 +483,33 @@ window.__ModuleLoader__.load({
           seen[path] = true;
           external.push(path);
         }
-        for (const path of external) {
+        const readExternal = await mapLimit(external, IO_CONCURRENCY, async (path) => {
           let result;
           try {
             result = await remote.workspaceFiles.read(sessionId, path, { limit: MAX_LINES }, signal);
           } catch (error) {
-            problems.push(path + ": " + describeError(error));
-            continue;
+            return { problem: path + ": " + describeError(error) };
           }
           if (!result || result.ok !== true) {
-            // Исчезнувший worktree — обычная гонка с board-sync, молчим про него.
             const code = result && result.error ? result.error.code : "";
-            if (code !== "workspace-file/not-found") {
-              problems.push(path + ": " + describeError(result ? result.error : null));
-            }
-            continue;
+            return code === "workspace-file/not-found"
+              ? null
+              : { problem: path + ": " + describeError(result ? result.error : null) };
           }
           const card = parseCard(basenameOf(path), (result.value || {}).text);
           card.source = "worktree";
           card.path = path;
-          const existing = byId.get(card.id);
-          if (!existing || isNewer(card, existing)) byId.set(card.id, card);
+          return { card };
+        });
+        for (const item of readExternal) {
+          if (!item) continue;
+          if (item.problem) {
+            problems.push(item.problem);
+            continue;
+          }
+          if (!item.card) continue;
+          const existing = byId.get(item.card.id);
+          if (!existing || isNewer(item.card, existing)) byId.set(item.card.id, item.card);
         }
 
         const merged = Array.from(byId.values()).sort(compareCards);
@@ -947,14 +983,23 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         let stopped = false;
         let timer = 0;
-        const controller = new AbortController();
+        let ticking = false;
+        let activeController = null;
         const tick = async () => {
+          if (stopped || ticking || typeof loadRef.current !== "function") return;
+          ticking = true;
+          const controller = new AbortController();
+          activeController = controller;
+          const timeout = setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
           let result;
-          if (typeof loadRef.current !== "function") return;
           try {
             result = await loadRef.current(controller.signal);
           } catch (error) {
             result = { ok: false, error: describeError(error) };
+          } finally {
+            clearTimeout(timeout);
+            if (activeController === controller) activeController = null;
+            ticking = false;
           }
           if (stopped) return;
           const ok = Boolean(result && result.ok);
@@ -977,7 +1022,7 @@ window.__ModuleLoader__.load({
         return () => {
           stopped = true;
           if (timer) clearInterval(timer);
-          controller.abort();
+          if (activeController) activeController.abort();
           if (moveAbortRef.current) moveAbortRef.current.abort();
         };
       }, [sessionId]);
@@ -1354,14 +1399,23 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         let stopped = false;
         let timer = 0;
-        const controller = new AbortController();
+        let ticking = false;
+        let activeController = null;
         const tick = async (force) => {
-          if (typeof readRef.current !== "function") return;
+          if (stopped || ticking || typeof readRef.current !== "function") return;
+          ticking = true;
+          const controller = new AbortController();
+          activeController = controller;
+          const timeout = setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
           let result;
           try {
             result = await readRef.current(controller.signal);
           } catch (error) {
             result = { ok: false, error: describeError(error) };
+          } finally {
+            clearTimeout(timeout);
+            if (activeController === controller) activeController = null;
+            ticking = false;
           }
           if (stopped) return;
           const ok = Boolean(result && result.ok);
@@ -1411,7 +1465,7 @@ window.__ModuleLoader__.load({
         return () => {
           stopped = true;
           if (timer) clearInterval(timer);
-          controller.abort();
+          if (activeController) activeController.abort();
         };
       }, [sessionId]);
 
