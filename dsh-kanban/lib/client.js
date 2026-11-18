@@ -462,7 +462,7 @@ window.__ModuleLoader__.load({
           try {
             result = await remote.workspaceFiles.read(sessionId, TASKS_DIR + "/" + name, { limit: MAX_LINES }, signal);
           } catch (error) {
-            if (isAborted(error) || signal.aborted) return { aborted: true };
+            if (isAborted(error) || signal?.aborted) return { aborted: true };
             return { problem: name + ": " + describeError(error) };
           }
           if (result && result.ok === true) {
@@ -470,7 +470,7 @@ window.__ModuleLoader__.load({
             card.source = "main";
             return { card };
           }
-          if (isAborted(result ? result.error : null) || signal.aborted) return { aborted: true };
+          if (isAborted(result ? result.error : null) || signal?.aborted) return { aborted: true };
           return { problem: name + ": " + describeError(result ? result.error : null) };
         });
         if (readMain.some((item) => item && item.aborted)) {
@@ -500,11 +500,11 @@ window.__ModuleLoader__.load({
           try {
             result = await remote.workspaceFiles.read(sessionId, path, { limit: MAX_LINES }, signal);
           } catch (error) {
-            if (isAborted(error) || signal.aborted) return { aborted: true };
+            if (isAborted(error) || signal?.aborted) return { aborted: true };
             return { problem: path + ": " + describeError(error) };
           }
           if (!result || result.ok !== true) {
-            if (isAborted(result ? result.error : null) || signal.aborted) return { aborted: true };
+            if (isAborted(result ? result.error : null) || signal?.aborted) return { aborted: true };
             const code = result && result.error ? result.error.code : "";
             return code === "workspace-file/not-found"
               ? null
