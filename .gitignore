@@ -19,3 +19,8 @@ __pycache__/
 .DS_Store
 .idea/
 *.log
+
+# Rust hub
+hub/target/
+hub/*.sqlite
+hub/*.sqlite-*

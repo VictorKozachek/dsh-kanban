@@ -1,0 +1,12 @@
+services:
+  kanban-hub:
+    build: ./hub
+    ports:
+      - "8787:8787"
+    environment:
+      KANBAN_HUB_TOKEN: "${KANBAN_HUB_TOKEN:?set KANBAN_HUB_TOKEN}"
+      KANBAN_HUB_LEASE_TTL_SECONDS: "1800"
+    volumes:
+      - hub-data:/data
+volumes:
+  hub-data:
