@@ -227,6 +227,21 @@ flowchart LR
 | M3 | HA (Postgres + standby), метрики, снапшоты, ограничения нагрузки |
 | M4 | Мульти-хаб/CRDT-репликация — если реально нужен active-active |
 
+## M0: хаб готов (18.11)
+
+- `hub/` — Rust (axum + rusqlite), SQLite; схема `instances`, `cards`.
+- API: `healthz`, heartbeat инстанса, список карточек `since`, `claim`,
+  `release`, `handoff`, `upsert` снимка с `base_rev` (CAS).
+- Lease: `claim`/`release`, TTL (`KANBAN_HUB_LEASE_TTL_SECONDS`, по умолчанию
+  30 мин), истёкший lease можно забрать; чужой/устаревший `base_rev` → 409.
+- Запуск: `cd hub && KANBAN_HUB_TOKEN=secret cargo run`; Docker —
+  `docker compose up --build`.
+- Тесты: 5 (auth/health, create/update/claim/release/handoff, CAS, expiry, list).
+- Клиент плагина (M1) пока не подключён; файловый режим работает как раньше.
+
+Следующий шаг — M1: клиент синка в плагине (outbox, курсор, remote-карточки
+read-only), затем M2 (UI «Взять»/handoff/conflicted).
+
 ## 7. Осталось решить
 
 1. **Single-writer/adopt** — принимаем схему «одна карточка — один домашний
