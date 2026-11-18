@@ -41,10 +41,17 @@ window.__ModuleLoader__.load({
     const POLL_MS = 3000;
     // Предел одного прохода загрузки доски: под нагрузкой Remote может
     // задержаться, и тогда опрос не должен «зависать» навсегда (#081/UX).
-    const LOAD_TIMEOUT_MS = 8000;
+    const LOAD_TIMEOUT_MS = 12000;
     // Параллельные чтения карточек: последовательный обход десятков файлов
     // делал обновление доски медленным при живой работе сессий.
-    const IO_CONCURRENCY = 6;
+    const IO_CONCURRENCY = 4;
+
+    /** Прерванный Remote (наш таймаут или отмена вкладки) — не ошибка файла. */
+    function isAborted(error) {
+      const code = String(error && error.code ? error.code : "");
+      const text = String(error && (error.message || error) ? error.message || error : "");
+      return code === "gateway/cancelled" || /abort|cancel/i.test(text);
+    }
 
     /** Ограниченный параллелизм для асинхронных операций. */
     async function mapLimit(items, limit, worker) {
@@ -455,6 +462,7 @@ window.__ModuleLoader__.load({
           try {
             result = await remote.workspaceFiles.read(sessionId, TASKS_DIR + "/" + name, { limit: MAX_LINES }, signal);
           } catch (error) {
+            if (isAborted(error) || signal.aborted) return { aborted: true };
             return { problem: name + ": " + describeError(error) };
           }
           if (result && result.ok === true) {
@@ -462,8 +470,12 @@ window.__ModuleLoader__.load({
             card.source = "main";
             return { card };
           }
+          if (isAborted(result ? result.error : null) || signal.aborted) return { aborted: true };
           return { problem: name + ": " + describeError(result ? result.error : null) };
         });
+        if (readMain.some((item) => item && item.aborted)) {
+          return { ok: false, error: "timeout: доска не успела прочитаться" };
+        }
         for (const item of readMain) {
           if (item.problem) problems.push(item.problem);
           else if (item.card) cards.push(item.card);
@@ -488,9 +500,11 @@ window.__ModuleLoader__.load({
           try {
             result = await remote.workspaceFiles.read(sessionId, path, { limit: MAX_LINES }, signal);
           } catch (error) {
+            if (isAborted(error) || signal.aborted) return { aborted: true };
             return { problem: path + ": " + describeError(error) };
           }
           if (!result || result.ok !== true) {
+            if (isAborted(result ? result.error : null) || signal.aborted) return { aborted: true };
             const code = result && result.error ? result.error.code : "";
             return code === "workspace-file/not-found"
               ? null
@@ -501,6 +515,9 @@ window.__ModuleLoader__.load({
           card.path = path;
           return { card };
         });
+        if (readExternal.some((item) => item && item.aborted)) {
+          return { ok: false, error: "timeout: доска не успела прочитаться" };
+        }
         for (const item of readExternal) {
           if (!item) continue;
           if (item.problem) {
