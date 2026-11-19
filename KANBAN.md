@@ -30,6 +30,8 @@
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
 | `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
 | `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
+| `dsh-kanban/lib/autostart.js` | Автостарт при холодном старте: `.kanban/autostart.json`, prompt по сессиям, oncePerDay |
+| `dsh-kanban/test/autostart.test.mjs` | Тесты автостарта: notBefore, дедуп по дню, невалидная сессия |
 | `dsh-kanban/lib/sync.js` | Клиент синка с хабом: pull/push, claim/release, state/remote cache |
 | `bin/kanban-sync.sh`, `bin/kanban-sync.mjs` | Ручной проход синка и статус (--once/--status/--json) |
 | `dsh-kanban/test/sync.test.mjs` | Тесты синка на мок-хабе: создание/обновление, конфликты, офлайн, выключение |
@@ -905,6 +907,26 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 
 Замок — дополнение к проверке `owner`, а не замена: `owner` отвечает за выдачу,
 замок — за то, что в worktree в один момент пишет одна сессия.
+
+### Автостарт рабочего дня
+
+Чтобы после открытия приложения работа начиналась сама, в проекте можно положить
+`.kanban/autostart.json` (файл локальный, в `.gitignore`):
+
+```json
+{
+  "enabled": true,
+  "notBefore": "2026-11-20T00:00:00+03:00",
+  "oncePerDay": true,
+  "sessions": ["session-…"],
+  "text": "Начинай рабочий день по порядку: …"
+}
+```
+
+На **холодном старте** плагин (не HMR) отправляет этот prompt в указанные сессии
+в очередь — как обычный наряд. Один раз в день на сессию, состояние в
+`$DSH_HOME/kanban-autostart.json`. Если `notBefore` в будущем — не отправляет.
+Диагностика: `autostart-sent`/`autostart-failed`.
 
 ### Обновление доски под нагрузкой
 

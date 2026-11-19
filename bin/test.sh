@@ -36,6 +36,7 @@ echo "== рендер доски (регистрация в контексте, 
 "$NODE" "$ROOT/dsh-kanban/test/resume.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/stale.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/sync.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/autostart.test.mjs"
 
 bash "$ROOT/bin/test-onboarding.sh"
 bash "$ROOT/bin/test-locks.sh"

@@ -25,3 +25,4 @@ __pycache__/
 hub/target/
 hub/*.sqlite
 hub/*.sqlite-*
+.kanban/autostart.json

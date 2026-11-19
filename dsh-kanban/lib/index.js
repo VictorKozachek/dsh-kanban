@@ -69,6 +69,7 @@ import { isIgnoredPath, isSessionId, pickBoardRoot } from "./watcher-core.js";
 import { resumeInterruptedSessions, resumeSettings } from "./resume.js";
 import { runStaleWatchdog, staleSettings } from "./stale.js";
 import { syncOnce, syncSettings } from "./sync.js";
+import { runAutostart } from "./autostart.js";
 
 // ---------------------------------------------------------------------------
 // Диагностика сторожа (issue #2): что видит host-половина и почему не доставляет
@@ -1346,6 +1347,19 @@ export function apply(ctx, config = {}) {
       } else {
         log(ctx, "warn", "sync включён, но не задан board (ни в sync.board, ни в boards)");
       }
+    }
+
+    // Автостарт рабочего дня: .kanban/autostart.json, только на холодном старте.
+    if (coldStart && !disposed) {
+      void runAutostart(ctx, {
+        boards: watchedBoards(),
+        home: process.env.DSH_HOME,
+        diagEvent,
+        log: (level, message) => log(ctx, level, message),
+        disposed: () => disposed,
+      }).catch((error) => {
+        diagEvent({ step: "autostart-failed", error: String(error?.message ?? error) });
+      });
     }
 
     // Stale-watchdog (issue #4): карточка стоит, роль не двигает — напоминание/эскалация.
