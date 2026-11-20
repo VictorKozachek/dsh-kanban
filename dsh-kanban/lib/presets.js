@@ -145,17 +145,32 @@ export async function registerRolePresets({ agentPresets, log = () => {}, file =
     return { ok: false, registered, duplicates, failures, dispose };
   }
 
+  // Регистрируем все определения в одном тике, не дожидаясь await между ними:
+  // DSH может возобновлять сессии сразу после apply, и если между регистрациями
+  // уступить event loop, часть пресетов ещё не существует (Unknown agent preset).
+  const pending = [];
   for (const definition of read.definitions) {
     const id = String(definition.id);
     try {
-      const unregister = await agentPresets.register(definition);
+      pending.push({ id, registration: agentPresets.register(definition) });
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      if (message.startsWith("Duplicate agent preset")) {
+        duplicates.push(id);
+        log("warn", `пресеты ролей: «${id}» уже зарегистрирован (дубликат) — оставляю существующее определение`);
+        continue;
+      }
+      failures.push(id);
+      log("warn", `пресеты ролей: «${id}» не зарегистрирован: ${shortText(message)}`);
+    }
+  }
+  for (const { id, registration } of pending) {
+    try {
+      const unregister = await registration;
       registered.push(id);
       if (typeof unregister === "function") disposers.push({ id, unregister });
     } catch (error) {
       const message = String(error?.message ?? error);
-      // Дубликат — не ошибка: legacy-строки профиля зарегистрировались первыми
-      // (или пресет уже объявлен другой копией плагина). Такие установки живут
-      // как раньше, плагин лишь не дублирует определения.
       if (message.startsWith("Duplicate agent preset")) {
         duplicates.push(id);
         log("warn", `пресеты ролей: «${id}» уже зарегистрирован (дубликат) — оставляю существующее определение`);
