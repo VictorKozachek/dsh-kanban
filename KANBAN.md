@@ -44,7 +44,7 @@
 | `dsh-kanban/test/assignment.test.mjs` | Тест нарядов асайна и недобора `todo` на временной доске |
 | `dsh-kanban/test/card-actions.test.mjs` | Тест командного канала: проверка запроса, асайн/возврат, отказы, форма Remote-службы для Gateway |
 | `dsh-kanban/test/shutdown.test.mjs` | Регрессия dispose: после выгрузки нет живых `fs.watch`/таймеров, in-flight наряд и дочерний `task-assign.sh` отменяются, повторный dispose безопасен, бюджет 200 мс на десятках досок |
-| `dsh-kanban/test/presets.test.mjs` | Тест самолечения пресетов: JSON-артефакт (id/order/plugins, `__jsExpr`), регистрация пяти ролей (включая analyst), дубликаты, dispose и диагностика битого артефакта |
+| `dsh-kanban/test/presets.test.mjs` | Тест самолечения пресетов: JSON-артефакт (id/order/plugins, `__jsExpr`), регистрация шести ролей (включая manager и analyst), дубликаты, dispose и диагностика битого артефакта |
 | `dsh-kanban/test/children.test.mjs` | Тест host-логики обзора детей: манифест с относительными и абсолютными путями, слияние с worktree, изоляция ошибок досок, счётчики, только чтение |
 | `dsh-kanban/test/children-render.test.mjs` | Тест вкладки «Дочерние доски»: регистрация второго таба, дерево досок, счётчики, drill-down и пустые состояния, отсутствие элементов переноса |
 | `test/fixtures/*.patch.yml` | Синтетические шаблоны пресетов для регрессий генератора |
@@ -57,7 +57,7 @@
 | `.agents/skills/commit/SKILL.md` | Скил: правило сообщения коммита `[{SHORT_BRANCH_NAME}] Message` |
 | `hub/` | Rust-хаб распределённой доски (M0): lease/claim, CAS, SQLite, API, Docker |
 | `.agents/skills/{write-tests,review-compat}/SKILL.md` | Скилы проекта: обязательные тесты у исполнителя и проверка совместимости tools/source kind у ревьювера |
-| `agent-presets/{dispatcher,worker,reviewer,verifier,analyst}/` | Заготовки пресетов агентов (аналитик — не роль доски) |
+| `agent-presets/{manager,dispatcher,worker,reviewer,verifier,analyst}/` | Заготовки пресетов агентов (manager и analyst — не роли доски) |
 | `bin/task-new.sh` | Завести задачу: worktree + ветка + карточка внутри ветки; `--backlog` — сразу в бэклог, `--spec NNN` — ссылка на спецификацию |
 | `bin/task-move.sh` | Перевести карточку в другой статус, записать `owner`/`note`, закоммитить карточку |
 | `bin/backlog-fill.sh` | Пополнить `todo` из `backlog` до `minTodo` и асайнить свободным исполнителям (`--dry-run`, `--min N`) |
@@ -148,7 +148,7 @@ bin/install-kanban.sh desktop
 dsh web
 ```
 
-Пресеты ролей (`dispatcher` / `worker` / `reviewer` / `verifier` и `analyst` —
+Пресеты ролей (`manager` / `dispatcher` / `worker` / `reviewer` / `verifier` и `analyst` —
 бизнес-аналитик, не роль доски) отдельной
 командой ставить **не нужно**: определения едут вместе с плагином
 (`dsh-kanban/presets/role-presets.json`) и регистрируются при каждом старте —
@@ -689,7 +689,7 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 - **неизвестный пресет** — отказ, если id нет ни в артефакте плагина
   `dsh-kanban/presets/role-presets.json` (генерирует `bin/gen-role-presets.sh`,
   #062; запасной путь — корневой `presets/role-presets.json`), ни среди
-  встроенных: `standard` и пять пресетов плагина (`dispatcher/worker/reviewer/
+  встроенных: `standard` и шесть пресетов плагина (`manager/dispatcher/worker/reviewer/
   verifier/analyst`) известны всегда — их регистрирует сам плагин (самолечение, спека
   005); осознанный обход — `--allow-unknown`;
 - **битый лог, не v4 или оборванный хвост** — отказ: дописывать за torn-кадром

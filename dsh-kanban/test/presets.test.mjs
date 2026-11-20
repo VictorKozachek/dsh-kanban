@@ -75,12 +75,13 @@ check("артефакт лежит в пакете плагина и читае�
   assert.equal(path.isAbsolute(PRESETS_FILE), true);
 });
 
-check("пять определений ролей со стабильными id и порядком", () => {
+check("шесть определений ролей со стабильными id и порядком", () => {
   const definitions = JSON.parse(fs.readFileSync(PRESETS_FILE, "utf8"));
   assert.ok(Array.isArray(definitions), "артефакт должен быть массивом определений");
   assert.deepEqual(
     definitions.map((definition) => [definition.id, definition.order]),
     [
+      ["manager", 9],
       ["dispatcher", 10],
       ["worker", 11],
       ["reviewer", 12],
@@ -140,7 +141,7 @@ check("YAML-тег !!js стал узлом __jsExpr, выражения сох�
 check("readRolePresets отдаёт определения и подсказку на битом файле", () => {
   const good = readRolePresets();
   assert.equal(good.ok, true);
-  assert.equal(good.definitions.length, 5);
+  assert.equal(good.definitions.length, 6);
   const broken = path.join(work, "broken.json");
   fs.writeFileSync(broken, "{ не json");
   const bad = readRolePresets(broken);
@@ -178,7 +179,7 @@ await checkAsync("dispose снимает определения в обратн�
   await result.dispose();
   assert.deepEqual(registry.calls.disposed, [...ROLE_IDS].reverse());
   await result.dispose();
-  assert.equal(registry.calls.disposed.length, 5, "повторный dispose снял что-то ещё");
+  assert.equal(registry.calls.disposed.length, 6, "повторный dispose снял что-то ещё");
 });
 
 await checkAsync("дубликат legacy-строки не рвёт регистрацию, остальные роли на месте", async () => {
@@ -186,12 +187,12 @@ await checkAsync("дубликат legacy-строки не рвёт регис�
   const logs = [];
   const result = await registerRolePresets({ agentPresets: registry, log: (level, message) => logs.push(`${level}: ${message}`) });
   assert.equal(result.ok, true, "дубликат не должен считаться сбоем");
-  assert.deepEqual(result.registered, ["dispatcher", "reviewer", "verifier", "analyst"]);
+  assert.deepEqual(result.registered, ["manager", "dispatcher", "reviewer", "verifier", "analyst"]);
   assert.deepEqual(result.duplicates, ["worker"]);
   assert.deepEqual(result.failures, []);
   assert.ok(logs.some((line) => /worker.*дубликат/.test(line)), `нет предупреждения о дубликате: ${logs.join(" | ")}`);
   await result.dispose();
-  assert.deepEqual(registry.calls.disposed, ["analyst", "verifier", "reviewer", "dispatcher"], "снимаются только свои определения");
+  assert.deepEqual(registry.calls.disposed, ["analyst", "verifier", "reviewer", "dispatcher", "manager"], "снимаются только свои определения");
 });
 
 await checkAsync("странная ошибка реестра фиксируется, но другие роли регистрируются", async () => {
@@ -200,7 +201,7 @@ await checkAsync("странная ошибка реестра фиксируе�
   const result = await registerRolePresets({ agentPresets: registry, log: (level, message) => logs.push(`${level}: ${message}`) });
   assert.equal(result.ok, false);
   assert.deepEqual(result.failures, ["reviewer"]);
-  assert.deepEqual(result.registered, ["dispatcher", "worker", "verifier", "analyst"]);
+  assert.deepEqual(result.registered, ["manager", "dispatcher", "worker", "verifier", "analyst"]);
   assert.ok(logs.some((line) => /reviewer/.test(line) && /не зарегистрирован/.test(line)), logs.join(" | "));
 });
 

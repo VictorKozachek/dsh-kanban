@@ -1913,7 +1913,7 @@ printf '[]\n' > "$preset_home/profiles/demo/cordis.patch.yml"
 if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard.patch.yml" \
      --personas "$ROOT/agent-presets" --out "$WORK/role-presets.patch.yml" >"$WORK/out20" 2>&1; then
   rows=$(grep -c 'id: preset-' "$WORK/role-presets.patch.yml")
-  if [[ "$rows" == "5" ]]; then pass "сгенерированы строки пяти ролей"; else fail "строк пресетов: $rows"; fi
+  if [[ "$rows" == "6" ]]; then pass "сгенерированы строки шести ролей"; else fail "строк пресетов: $rows"; fi
   if grep -q "Ты исполнитель" "$WORK/role-presets.patch.yml"; then
     pass "персона роли попала в строку"
   else
@@ -1943,6 +1943,11 @@ if "$ROOT/bin/gen-role-presets.sh" --standard "$ROOT/test/fixtures/standard.patc
     pass "ревьювер ссылается на скил review-compat"
   else
     fail "ревьювер не ссылается на review-compat"
+  fi
+  if grep -q "Ты \*\*менеджер\*\*" "$WORK/role-presets.patch.yml"; then
+    pass "персона manager попала в строку"
+  else
+    fail "нет персоны manager"
   fi
   if grep -q '!!js' "$WORK/role-presets.patch.yml"; then
     pass "js-условия шаблона сохранены"
