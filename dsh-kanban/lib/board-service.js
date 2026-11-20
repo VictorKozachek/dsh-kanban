@@ -34,7 +34,12 @@ class BoardService {
     if (!cwd) return { ok: false, error: "session cwd unavailable" };
     const byId = new Map();
     for (const entry of readLocalCards(cwd).values()) {
-      const card = { ...entry.card, source: "main" };
+      const card = {
+        ...entry.card,
+        key: `${entry.card.id}.md`,
+        file: `.kanban/tasks/${entry.card.id}.md`,
+        source: "main",
+      };
       byId.set(String(card.id), card);
     }
     for (const root of [path.join(cwd, "worktrees"), path.join(cwd, ".worktrees")]) {
@@ -46,6 +51,8 @@ class BoardService {
         if (!parsed) continue;
         const card = parseCard(parsed.text);
         if (card.broken) continue;
+        card.key = `${card.id}.md`;
+        card.file = `worktrees/${name}/.kanban/tasks/${card.id}.md`;
         card.source = "worktree";
         const existing = byId.get(String(card.id));
         if (!existing || String(card.updated || "") >= String(existing.updated || "")) byId.set(String(card.id), card);

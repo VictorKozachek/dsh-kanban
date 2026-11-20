@@ -18,5 +18,7 @@ const result = await service.read({ sessionId: "session-x" });
 assert.equal(result.ok, true);
 assert.deepEqual(result.value.cards.map((card) => card.id), ["001", "002"]);
 assert.equal(result.value.cards.find((card) => card.id === "002").title, "Branch");
+assert.equal(result.value.cards.find((card) => card.id === "001").key, "001.md", "нет стабильного key для выбора карточки");
+assert.equal(result.value.cards.find((card) => card.id === "002").key, "002.md");
 assert.equal(result.value.cards.find((card) => card.id === "002").source, "worktree");
 console.log("board-service.test.mjs: все проверки прошли");
