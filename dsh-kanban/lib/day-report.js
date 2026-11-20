@@ -169,8 +169,11 @@ export function buildCheckout(boards, { now = Date.now() } = {}) {
   return { markdown, sections, canShutdown: allOk, reasons };
 }
 
-export function runCheckout(boards, { now = Date.now(), reportFile, out } = {}) {
+export function runCheckout(boards, { now = Date.now(), reportFile, out, push = true } = {}) {
   const first = boards[0] ?? process.cwd();
+  // Пуш — операция checkout (по решению владельца): отправляем всё, что уже
+  // закоммичено. Грязные файлы не коммитим — они остаются причиной «нельзя».
+  if (push) for (const board of boards) git(board, ["push"]);
   const report = buildCheckout(boards, { now });
   const file = reportFile ?? path.join(first, ".kanban", ".checkout", `${dateOf(now)}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });

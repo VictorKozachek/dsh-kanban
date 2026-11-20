@@ -11,6 +11,7 @@ for (let index = 0; index < args.length; index += 1) {
 const outIndex = args.indexOf("--out");
 const report = runCheckout(boards.length ? boards : [process.cwd()], {
   reportFile: outIndex >= 0 ? path.resolve(args[outIndex + 1]) : undefined,
+  push: !args.includes("--no-push"),
 });
 if (args.includes("--json")) console.log(JSON.stringify({ file: report.file, canShutdown: report.canShutdown, reasons: report.reasons }, null, 2));
 else {
