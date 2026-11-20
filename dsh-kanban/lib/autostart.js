@@ -24,7 +24,7 @@ import { isSessionId } from "./watcher-core.js";
 
 const CONFIG_FILE = ".kanban/autostart.json";
 const STATE_FILE = "kanban-autostart.json";
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 30_000;
 
 function readJson(file, fallback) {
   try {
@@ -71,6 +71,11 @@ export async function runAutostart(ctx, { boards, home, log = () => {}, diagEven
   const state = readJson(statePath, { day: "", sent: [] });
   const day = dayOf(now);
   const already = new Set(state.day === day ? state.sent ?? [] : []);
+
+  // Отмечаем день до отправки: prompt на холодной сессии может ответить
+  // позже таймаута (сообщение при этом уже доставлено), и повторный старт
+  // не должен присылать тот же план второй раз.
+  writeJson(statePath, { day, sent: [...new Set([...already, ...sessions])] });
 
   let sent = 0;
   for (const sessionId of sessions) {
