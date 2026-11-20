@@ -30,6 +30,9 @@
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
 | `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
 | `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
+| `dsh-kanban/lib/day-report.js` | Отчёты дня: checkin по доскам, «с прошлого раза», блокеры/спящие |
+| `bin/checkin.sh`, `bin/checkin.mjs` | Утренний отчёт `/checkin` |
+| `dsh-kanban/test/checkin.test.mjs` | Тесты checkin: отчёт, повтор, спящий todo |
 | `dsh-kanban/lib/autostart.js` | Автостарт при холодном старте: `.kanban/autostart.json`, prompt по сессиям, oncePerDay |
 | `dsh-kanban/test/autostart.test.mjs` | Тесты автостарта: notBefore, дедуп по дню, невалидная сессия |
 | `dsh-kanban/lib/sync.js` | Клиент синка с хабом: pull/push, claim/release, state/remote cache |
@@ -907,6 +910,22 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 
 Замок — дополнение к проверке `owner`, а не замена: `owner` отвечает за выдачу,
 замок — за то, что в worktree в один момент пишет одна сессия.
+
+### Команды дня: checkin / checkout
+
+- **`/checkin`** — утренний отчёт по доскам. Скрипт `bin/checkin.sh`
+  читает `.kanban/tasks` (сделано с прошлого раза, в работе, todo, блокеры,
+  спящие todo), пишет `.kanban/.checkin/<date>.md` и сдвигает отметку, чтобы
+  «сделано» не повторялось. Manager использует отчёт как фактическую базу и
+  дополняет ответами оркестраторов.
+- **`/checkout`** — вечерний отчёт и финальный вердикт «можно выключать»
+  (реализуется в #088; в отчёте — незакоммиченные/незапушенные изменения,
+  блокеры, расхождения с трекером).
+
+```bash
+bin/checkin.sh
+bin/checkin.sh --board ../other-project --out /tmp/checkin.md --json
+```
 
 ### Автостарт рабочего дня
 

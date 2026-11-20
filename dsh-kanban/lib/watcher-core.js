@@ -97,7 +97,7 @@ export function isSessionId(value) {
  * заново, а не осталась в нём с прошлого раза. `spec` — ссылка на спецификацию
  * (`.kanban/specs/<NNN>.md`): по ней видно, из какой нарезки задача.
  */
-const FIELDS = ["id", "title", "status", "owner", "role", "spec", "updated"];
+const FIELDS = ["id", "title", "status", "owner", "role", "spec", "updated", "note", "branch", "worktree", "tokens", "since"];
 
 /**
  * Разобрать карточку: front matter между первыми `---` плюс первый абзац задачи.
