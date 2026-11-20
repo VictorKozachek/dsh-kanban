@@ -529,6 +529,21 @@ window.__ModuleLoader__.load({
           if (!existing || isNewer(item.card, existing)) byId.set(item.card.id, item.card);
         }
 
+        // Кэш синка: карточки других людей/машин — только для чтения (M2).
+        try {
+          const cached = await remote.workspaceFiles.read(sessionId, ".kanban/.sync/remote.json", { limit: MAX_LINES }, signal);
+          if (cached && cached.ok === true) {
+            const parsed = JSON.parse((cached.value || {}).text || "{}");
+            for (const item of parsed.cards || []) {
+              if (!item || !item.id || byId.has(String(item.id))) continue;
+              const card = { ...(item.payload || {}), id: String(item.id), source: "remote", remote: true };
+              byId.set(card.id, card);
+            }
+          }
+        } catch (error) {
+          // Нет кэша/битый JSON — обычная ситуация без синка.
+        }
+
         const merged = Array.from(byId.values()).sort(compareCards);
         return { ok: true, value: { cards: merged, problems, truncated: value.truncated === true } };
       };
@@ -941,7 +956,7 @@ window.__ModuleLoader__.load({
         selected ? styles.cardSelected : null,
         onSelect ? { cursor: "pointer" } : null
       );
-      const draggable = Boolean(action) && typeof onDragStart === "function" && !busy;
+      const draggable = Boolean(action) && typeof onDragStart === "function" && !busy && !card.remote;
       return h(
         "article",
         {

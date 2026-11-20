@@ -520,4 +520,21 @@ assert.equal(deduped.ok, true);
 assert.equal(externalReads, 1, "дубликат из манифеста не приводит к повторному чтению");
 assert.equal(deduped.value.cards.filter((card) => card.id === "002").length, 1);
 
+// --- удалённые карточки из кэша синка (M2) ----------------------------------
+const remoteCache = {
+  workspaceFiles: {
+    list: async () => ({ ok: true, value: { entries: [] } }),
+    read: async (_sessionId, path) =>
+      path === ".kanban/.sync/remote.json"
+        ? { ok: true, value: { text: JSON.stringify({ cards: [{ id: "010", payload: { status: "todo", title: "Чужая" }, lease: { instance: "b" } }] }) } }
+        : { ok: false, error: { code: "workspace-file/not-found" } },
+  },
+};
+const withRemote = await createLoader(remoteCache)("session-1");
+assert.equal(withRemote.ok, true);
+const remoteCard = withRemote.value.cards.find((card) => card.id === "010");
+assert.ok(remoteCard, "карточка из кэша синка не попала на доску");
+assert.equal(remoteCard.source, "remote");
+assert.equal(remoteCard.remote, true);
+
 console.log("parse.test.mjs: все проверки прошли");
