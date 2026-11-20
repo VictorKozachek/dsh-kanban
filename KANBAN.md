@@ -30,6 +30,9 @@
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
 | `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
 | `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
+| `bin/kanban-claim.sh`, `bin/kanban-claim.mjs` | claim/release/handoff карточки на хабе (M2) |
+| `dsh-kanban/lib/hub-client.js` | Клиент хаба для claim/release/handoff |
+| `dsh-kanban/test/hub-client.test.mjs` | Тесты claim/release/handoff |
 | `bin/checkout.sh`, `bin/checkout.mjs` | Вечерний `/checkout`: git-статус, блокеры, вердикт «можно выключать» |
 | `dsh-kanban/test/checkout.test.mjs` | Тесты checkout: чистый репозиторий, грязный, блокер |
 | `dsh-kanban/lib/day-report.js` | Отчёты дня: checkin по доскам, «с прошлого раза», блокеры/спящие |
@@ -931,6 +934,15 @@ bin/session-preset.sh --restore ~/.dsh/session-backups/<id>.<ts>.zst
 bin/checkin.sh
 bin/checkin.sh --board ../other-project --out /tmp/checkin.md --json
 ```
+
+### Распределённая доска: claim/handoff
+
+- `bin/kanban-claim.sh --card <id>` — взять lease (claim), `--release` — отпустить,
+  `--handoff --to <user>` — передать. Настройки: `.kanban/sync.json` или env
+  `KANBAN_HUB_URL/TOKEN/PROJECT/INSTANCE/USER`.
+- Remote-карточки на доске — read-only (`source: remote`), без drag-and-drop.
+- Конфликт lease/base_rev отмечается в `.kanban/.sync/state.json` как
+  `conflicted: true` с `lastError`; успешный sync снимает флаг.
 
 ### Автостарт рабочего дня
 

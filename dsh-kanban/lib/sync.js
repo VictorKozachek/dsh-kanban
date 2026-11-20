@@ -202,6 +202,7 @@ export async function syncOnce({ board, settings, fetchImpl = fetch, log = () =>
           });
           if (claim.status === 409) {
             summary.conflicts += 1;
+            state.cards[id] = { ...(state.cards[id] || {}), conflicted: true, lastError: "held by another instance" };
             log("info", `sync: ${id} держит другой инстанс, пропускаю`);
             continue;
           }
@@ -221,11 +222,12 @@ export async function syncOnce({ board, settings, fetchImpl = fetch, log = () =>
         });
         if (upsert.status === 409) {
           summary.conflicts += 1;
+          state.cards[id] = { ...(state.cards[id] || {}), conflicted: true, lastError: "stale base_rev" };
           log("info", `sync: ${id} устарел на хабе, перечитаю в следующий раз`);
         } else if (upsert.status !== 200) {
           throw new Error(`upsert ${upsert.status}: ${JSON.stringify(upsert.data)}`);
         } else {
-          state.cards[id] = { hash: local.hash, rev: Number(upsert.data?.rev ?? baseRev + 1), syncedAt: new Date().toISOString() };
+          state.cards[id] = { hash: local.hash, rev: Number(upsert.data?.rev ?? baseRev + 1), syncedAt: new Date().toISOString(), conflicted: false };
           summary.pushed += 1;
         }
         if (claimed) {

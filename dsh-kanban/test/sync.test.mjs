@@ -224,6 +224,8 @@ await check("чужой lease не перезаписывается: конфл�
   assert.equal(result.pushed, 0);
   assert.equal(result.conflicts, 1);
   assert.equal(hub.cards.get("003").payload.status, "todo");
+  const state = JSON.parse(fs.readFileSync(path.join(board, ".kanban", ".sync", "state.json"), "utf8"));
+  assert.equal(state.cards["003"].conflicted, true, "конфликт не отмечен в state");
   await hub.close();
 });
 
