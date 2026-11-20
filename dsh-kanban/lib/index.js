@@ -64,6 +64,7 @@ import {
   sessionCwdFromContext,
 } from "./card-actions.js";
 import { registerChildrenService } from "./children.js";
+import { registerBoardService } from "./board-service.js";
 import { registerRolePresets } from "./presets.js";
 import { isIgnoredPath, isSessionId, pickBoardRoot } from "./watcher-core.js";
 import { resumeInterruptedSessions, resumeSettings } from "./resume.js";
@@ -653,7 +654,8 @@ export function apply(ctx, config = {}) {
     /** Регистрация службы канала: снимаем её сами, не надеясь на порядок unload. */
     let channelRegistration = null;
     /** Регистрация службы обзора дочерних досок (#059): снимается там же, где канал. */
-    let childrenRegistration = null;
+    let boardRegistration = null;
+let childrenRegistration = null;
 
     /**
      * Единый cleanup плагина: отмена доставок и детей, закрытие наблюдателей и
@@ -715,7 +717,8 @@ export function apply(ctx, config = {}) {
       }
       channelRegistration = null;
       try {
-        void childrenRegistration?.dispose?.();
+        void boardRegistration?.dispose?.();
+    childrenRegistration?.dispose?.();
       } catch (error) {
         log(ctx, "warn", `служба обзора детей не снялась: ${error?.message ?? error}`);
       }
@@ -781,6 +784,14 @@ export function apply(ctx, config = {}) {
     // Обзор дочерних досок (#059): только чтение манифеста `.kanban/children.json`
     // из каталога сессии. Регистрируется независимо от `boards`/`roots`: обзору
     // конфиг сторожа не нужен, только каталог сессии.
+    try {
+      boardRegistration = registerBoardService(ctx, {
+        resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),
+      });
+    } catch (error) {
+      log(ctx, "warn", `служба batch-доски не поднялась: ${error?.message ?? error}`);
+    }
+
     try {
       childrenRegistration = registerChildrenService(ctx, {
         resolveSessionCwd: (sessionId) => sessionCwdFromContext(ctx, sessionId),

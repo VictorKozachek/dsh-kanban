@@ -549,6 +549,25 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /** Batch-читатель доски через host-службу `kanbanBoard/read` (#090). */
+    function createBatchReader(connection) {
+      return async function readBatch(sessionId, signal) {
+        if (!connection || !connection.rpc || typeof connection.rpc.call !== "function") return null;
+        try {
+          const envelope = await connection.rpc.call(
+            "/api",
+            "kanbanBoard/read",
+            { args: { request: { sessionId } } },
+            signal
+          );
+          if (!envelope || envelope.ok !== true || !envelope.value || envelope.value.ok !== true) return null;
+          return envelope.value;
+        } catch {
+          return null;
+        }
+      };
+    }
+
     /** Фабрика бизнес-лица: превращает читатель в prop `loadBoard` тела слота. */
     /**
      * Namespace host-команды перемещения карточки: endpoint — `<namespace>/<method>`
@@ -1833,7 +1852,12 @@ window.__ModuleLoader__.load({
         "dsh-kanban: tab type"
       );
 
-      const loadBoard = createLoader(ctx.remote);
+      const fileLoader = createLoader(ctx.remote);
+      const batchLoader = createBatchReader(ctx.connection);
+      const loadBoard = async (sessionId, signal) => {
+        const batch = await batchLoader(sessionId, signal);
+        return batch ?? fileLoader(sessionId, signal);
+      };
       // Канал перемещения карточки живёт на хосте (#047): клиент только читает файлы.
       const moveCard = createCardMover(ctx.connection);
 
