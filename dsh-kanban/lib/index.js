@@ -1349,6 +1349,10 @@ export function apply(ctx, config = {}) {
       }
     }
 
+    // Холодный старт = молодой Host-процесс. HMR-перезагрузка модуля
+    // пересоздаёт diagState (applyCount снова 1), но процесс живёт давно.
+    const coldStart = (process.uptime?.() ?? 0) < 120;
+
     // Автостарт рабочего дня: .kanban/autostart.json, только на холодном старте.
     if (coldStart && !disposed) {
       void runAutostart(ctx, {
@@ -1383,9 +1387,6 @@ export function apply(ctx, config = {}) {
     }
 
     // Авто-возврат прерванных сессий (issue #4): не блокирует apply, ошибки — в diag.
-    // Холодный старт = молодой Host-процесс. HMR-перезагрузка модуля
-    // пересоздаёт diagState (applyCount снова 1), но процесс живёт давно.
-    const coldStart = (process.uptime?.() ?? 0) < 120;
     if (resumeSettings(config).enabled && !disposed && coldStart) {
       void resumeInterruptedSessions(ctx, {
         boards: watchedBoards(),
