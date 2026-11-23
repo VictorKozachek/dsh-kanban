@@ -6,6 +6,11 @@ services:
     environment:
       KANBAN_HUB_TOKEN: "${KANBAN_HUB_TOKEN:?set KANBAN_HUB_TOKEN}"
       KANBAN_HUB_LEASE_TTL_SECONDS: "1800"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/readyz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
     volumes:
       - hub-data:/data
 volumes:

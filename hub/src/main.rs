@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -37,6 +37,7 @@ const DEFAULT_TTL_MS: i64 = 30 * 60 * 1000;
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
+    started_at: Instant,
     token: String,
     lease_ttl_ms: i64,
 }
@@ -157,6 +158,33 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn readyz(State(state): State<AppState>) -> Result<&'static str, ApiError> {
+    let conn = state.db.lock().unwrap();
+    conn.query_row("SELECT 1", [], |_| Ok(())).map_err(db_error)?;
+    Ok("ok")
+}
+
+async fn metrics(State(state): State<AppState>) -> Result<String, ApiError> {
+    let conn = state.db.lock().unwrap();
+    let cards: i64 = conn
+        .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+        .map_err(db_error)?;
+    let leases: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM cards WHERE lease_until IS NOT NULL AND lease_until > ?1",
+            params![now_ms()],
+            |row| row.get(0),
+        )
+        .map_err(db_error)?;
+    let instances: i64 = conn
+        .query_row("SELECT COUNT(*) FROM instances", [], |row| row.get(0))
+        .map_err(db_error)?;
+    let uptime = state.started_at.elapsed().as_secs();
+    Ok(format!(
+        "# TYPE kanban_cards_total gauge\nkanban_cards_total {cards}\n# TYPE kanban_leases_active gauge\nkanban_leases_active {leases}\n# TYPE kanban_instances_total gauge\nkanban_instances_total {instances}\n# TYPE kanban_uptime_seconds gauge\nkanban_uptime_seconds {uptime}\n"
+    ))
 }
 
 #[derive(Deserialize)]
@@ -465,6 +493,8 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 fn app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .route("/metrics", get(metrics))
         .route(
             "/v1/projects/{project}/instances/{instance}/heartbeat",
             post(heartbeat),
@@ -501,6 +531,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_db(&conn)?;
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
+        started_at: Instant::now(),
         token,
         lease_ttl_ms,
     };
@@ -522,6 +553,7 @@ mod tests {
         init_db(&conn).unwrap();
         AppState {
             db: Arc::new(Mutex::new(conn)),
+            started_at: Instant::now(),
             token: "test-token".to_string(),
             lease_ttl_ms: 60_000,
         }
@@ -560,6 +592,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn readiness_and_metrics() {
+        let app = app(state());
+        let ready = app
+            .clone()
+            .oneshot(Request::builder().uri("/readyz").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(ready.status(), StatusCode::OK);
+        let response = app
+            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(text.contains("kanban_cards_total 0"), "{text}");
+        assert!(text.contains("kanban_uptime_seconds"), "{text}");
     }
 
     #[tokio::test]

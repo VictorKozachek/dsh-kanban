@@ -252,6 +252,16 @@ read-only), затем M2 (UI «Взять»/handoff/conflicted).
 - Тесты: 7 на мок-хабе (создание/обновление, конфликт lease, remote, офлайн,
   выключение).
 
+## M3, первый срез (23.11)
+
+- Hub: `GET /readyz` (проверка SQLite) и `GET /metrics` (Prometheus:
+  `kanban_cards_total`, `kanban_leases_active`, `kanban_instances_total`,
+  `kanban_uptime_seconds`).
+- Docker: `HEALTHCHECK` и compose-healthcheck на `/readyz`.
+- Тесты hub: 6 (добавлены readiness/metrics).
+- Осталось для полноценного M3: Postgres/`sqlx`, standby/репликация, бэкапы,
+  snapshot/restore, нагрузочный тест.
+
 ## 7. Осталось решить
 
 1. **Single-writer/adopt** — принимаем схему «одна карточка — один домашний
