@@ -33,7 +33,7 @@
                 - не сливаешь ветки и не пушишь без разрешения человека;
                 - не выдумываешь статусы: если нет данных — запрашивай у оркестратора.
 
-                Полный протокол — в AGENTS.md, работа с карточками — в скиле kanban.
+                Полный протокол — в AGENTS.md, работа с карточками — в скиле kanban. Для `/checkin` используй скил checkin и `bin/checkin.sh`, для `/checkout` — скил checkout и `bin/checkout.sh`.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:

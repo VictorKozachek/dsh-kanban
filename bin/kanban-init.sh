@@ -84,7 +84,7 @@ done
 copy_file "$ROOT/AGENTS.md" "$TARGET/AGENTS.md"
 copy_file "$ROOT/.kanban/tasks/README.md" "$TARGET/.kanban/tasks/README.md"
 copy_file "$ROOT/dsh-kanban/lib/watcher-core.js" "$TARGET/dsh-kanban/lib/watcher-core.js"
-for skill in write-tests review-compat; do
+for skill in write-tests review-compat checkin checkout; do
   copy_file "$ROOT/.agents/skills/$skill/SKILL.md" "$TARGET/.agents/skills/$skill/SKILL.md"
 done
 

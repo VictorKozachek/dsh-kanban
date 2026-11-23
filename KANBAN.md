@@ -37,6 +37,8 @@
 | `dsh-kanban/test/hub-client.test.mjs` | Тесты claim/release/handoff |
 | `bin/checkout.sh`, `bin/checkout.mjs` | Вечерний `/checkout`: git-статус, блокеры, вердикт «можно выключать» |
 | `dsh-kanban/test/checkout.test.mjs` | Тесты checkout: чистый репозиторий, грязный, блокер |
+| `.agents/skills/checkin/SKILL.md` | Протокол `/checkin`: отчёт по доскам, каскад, ответ менеджеру |
+| `.agents/skills/checkout/SKILL.md` | Протокол `/checkout`: git/блокеры, пуш, вердикт «можно выключать» |
 | `dsh-kanban/lib/day-report.js` | Отчёты дня: checkin по доскам, «с прошлого раза», блокеры/спящие |
 | `bin/checkin.sh`, `bin/checkin.mjs` | Утренний отчёт `/checkin` |
 | `dsh-kanban/test/checkin.test.mjs` | Тесты checkin: отчёт, повтор, спящий todo |
