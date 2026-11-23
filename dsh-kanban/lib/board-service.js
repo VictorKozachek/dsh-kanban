@@ -6,7 +6,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { sessionCwdFromContext } from "./card-actions.js";
-import { readLocalCards } from "./sync.js";
 import { parseCard } from "./watcher-core.js";
 import { markRemoteMethod } from "./card-actions.js";
 
@@ -23,6 +22,52 @@ function parseFile(file) {
   }
 }
 
+/** Тело карточки: description/comments — тот же формат, что у клиента. */
+function enrich(card, text) {
+  if (!card || card.broken) return card;
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  let start = 0;
+  if (lines[0]?.trim() === "---") {
+    start = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+    if (start < 0) start = 0;
+    start += 1;
+  }
+  const bodyLines = lines.slice(start);
+  const comments = [];
+  let current = null;
+  for (const line of bodyLines) {
+    const found = /^-\s*(\d{4}-\d{2}-\d{2}T[\d:]+Z?)\s*\[([^\]]+)\]\s*(.*)$/.exec(line);
+    if (found) {
+      if (current) comments.push(current);
+      current = { at: found[1], status: found[2].trim(), lines: found[3] ? [found[3]] : [] };
+      continue;
+    }
+    if (current) {
+      if (/^##\s/.test(line) || (line.trim() !== "" && !/^\s/.test(line))) {
+        comments.push(current); current = null; continue;
+      }
+      current.lines.push(line);
+    }
+  }
+  if (current) comments.push(current);
+  for (const item of comments) {
+    item.text = item.lines.map((line) => line.replace(/^ {1,2}/, "")).join("\n").trim();
+    delete item.lines;
+  }
+  const hasTask = bodyLines.some((line) => /^##\s*Задача\s*$/.test(line));
+  const description = [];
+  if (hasTask) {
+    let inside = false;
+    for (const line of bodyLines) {
+      if (/^##\s/.test(line)) { inside = /^##\s*Задача\s*$/.test(line); continue; }
+      if (inside) description.push(line);
+    }
+  } else {
+    for (const line of bodyLines) { if (/^##\s/.test(line)) break; description.push(line); }
+  }
+  return { ...card, body: bodyLines.join("\n").trim(), description: description.join("\n").trim(), comments };
+}
+
 class BoardService {
   constructor(options) {
     this.options = options;
@@ -33,13 +78,17 @@ class BoardService {
     const cwd = await this.options.resolveSessionCwd(sessionId);
     if (!cwd) return { ok: false, error: "session cwd unavailable" };
     const byId = new Map();
-    for (const entry of readLocalCards(cwd).values()) {
-      const card = {
-        ...entry.card,
-        key: `${entry.card.id}.md`,
-        file: `.kanban/tasks/${entry.card.id}.md`,
-        source: "main",
-      };
+    let names = [];
+    try { names = fs.readdirSync(path.join(cwd, ".kanban", "tasks")); } catch { names = []; }
+    for (const name of names) {
+      if (!name.endsWith(".md") || name.toLowerCase() === "readme.md") continue;
+      let text;
+      try { text = fs.readFileSync(path.join(cwd, ".kanban", "tasks", name), "utf8"); } catch { continue; }
+      const card = enrich(parseCard(text), text);
+      if (card.broken) continue;
+      card.key = name;
+      card.file = `.kanban/tasks/${name}`;
+      card.source = "main";
       byId.set(String(card.id), card);
     }
     for (const root of [path.join(cwd, "worktrees"), path.join(cwd, ".worktrees")]) {
@@ -49,7 +98,7 @@ class BoardService {
         const file = path.join(root, name, ".kanban", "tasks", `${name}.md`);
         const parsed = parseFile(file);
         if (!parsed) continue;
-        const card = parseCard(parsed.text);
+        const card = enrich(parseCard(parsed.text), parsed.text);
         if (card.broken) continue;
         card.key = `${card.id}.md`;
         card.file = `worktrees/${name}/.kanban/tasks/${card.id}.md`;
