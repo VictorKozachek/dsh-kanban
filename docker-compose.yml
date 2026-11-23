@@ -6,6 +6,7 @@ services:
     environment:
       KANBAN_HUB_TOKEN: "${KANBAN_HUB_TOKEN:?set KANBAN_HUB_TOKEN}"
       KANBAN_HUB_LEASE_TTL_SECONDS: "1800"
+      KANBAN_HUB_BACKUP_DIR: "/data/backups"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/readyz"]
       interval: 30s

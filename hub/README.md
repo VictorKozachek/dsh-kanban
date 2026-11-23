@@ -20,6 +20,7 @@ KANBAN_HUB_TOKEN=secret KANBAN_HUB_DB=./hub.sqlite cargo run
 | `KANBAN_HUB_DB` | `hub.sqlite` | файл SQLite |
 | `KANBAN_HUB_TOKEN` | `dev-token` | Bearer-токен (в проде задайте свой) |
 | `KANBAN_HUB_LEASE_TTL_SECONDS` | `1800` | TTL lease (30 мин) |
+| `KANBAN_HUB_BACKUP_DIR` | `backups` | каталог snapshot-бэкапов |
 
 Docker:
 
@@ -56,6 +57,9 @@ curl -X POST localhost:8787/v1/projects/demo/cards/001/release \
 curl -X POST localhost:8787/v1/projects/demo/cards/001/handoff \
   -H 'Authorization: Bearer secret' -H 'content-type: application/json' \
   -d '{"instance":"bob-mbp","assignee":"carol"}'
+
+# snapshot базы (SQLite VACUUM INTO)
+curl -X POST localhost:8787/admin/backup -H 'Authorization: Bearer secret'
 
 # всё, что изменилось после updated_at
 curl 'localhost:8787/v1/projects/demo/cards?since=0' -H 'Authorization: Bearer secret'

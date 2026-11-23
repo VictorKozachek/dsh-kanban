@@ -37,6 +37,7 @@ const DEFAULT_TTL_MS: i64 = 30 * 60 * 1000;
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
+    backup_dir: String,
     started_at: Instant,
     token: String,
     lease_ttl_ms: i64,
@@ -164,6 +165,17 @@ async fn readyz(State(state): State<AppState>) -> Result<&'static str, ApiError>
     let conn = state.db.lock().unwrap();
     conn.query_row("SELECT 1", [], |_| Ok(())).map_err(db_error)?;
     Ok("ok")
+}
+
+async fn backup(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
+    authorize(&state, &headers)?;
+    let dir = std::path::Path::new(&state.backup_dir);
+    std::fs::create_dir_all(dir).map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("backup dir: {error}")))?;
+    let file = dir.join(format!("kanban-{}.sqlite", now_ms()));
+    let conn = state.db.lock().unwrap();
+    conn.execute("VACUUM INTO ?1", params![file.to_string_lossy().to_string()])
+        .map_err(db_error)?;
+    Ok(Json(json!({ "ok": true, "file": file.to_string_lossy() })))
 }
 
 async fn metrics(State(state): State<AppState>) -> Result<String, ApiError> {
@@ -495,6 +507,7 @@ fn app(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics))
+        .route("/admin/backup", post(backup))
         .route(
             "/v1/projects/{project}/instances/{instance}/heartbeat",
             post(heartbeat),
@@ -529,8 +542,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let conn = Connection::open(&db_path)?;
     init_db(&conn)?;
+    let backup_dir = env::var("KANBAN_HUB_BACKUP_DIR").unwrap_or_else(|_| "backups".to_string());
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
+        backup_dir,
         started_at: Instant::now(),
         token,
         lease_ttl_ms,
@@ -553,6 +568,7 @@ mod tests {
         init_db(&conn).unwrap();
         AppState {
             db: Arc::new(Mutex::new(conn)),
+            backup_dir: std::env::temp_dir().join("kanban-hub-backup-test").to_string_lossy().to_string(),
             started_at: Instant::now(),
             token: "test-token".to_string(),
             lease_ttl_ms: 60_000,
@@ -592,6 +608,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn backup_creates_snapshot() {
+        let app = app(state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/backup")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let value = json(response).await;
+        let file = value["file"].as_str().unwrap_or("");
+        assert!(!file.is_empty());
+        assert!(std::path::Path::new(file).exists(), "бэкап не создан: {file}");
+        let _ = std::fs::remove_file(file);
     }
 
     #[tokio::test]
