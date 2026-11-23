@@ -536,7 +536,14 @@ window.__ModuleLoader__.load({
             const parsed = JSON.parse((cached.value || {}).text || "{}");
             for (const item of parsed.cards || []) {
               if (!item || !item.id || byId.has(String(item.id))) continue;
-              const card = { ...(item.payload || {}), id: String(item.id), source: "remote", remote: true };
+              const card = {
+                ...(item.payload || {}),
+                id: String(item.id),
+                key: `${item.id}.md`,
+                file: `.kanban/tasks/${item.id}.md`,
+                source: "remote",
+                remote: true,
+              };
               byId.set(card.id, card);
             }
           }
@@ -561,7 +568,13 @@ window.__ModuleLoader__.load({
             signal
           );
           if (!envelope || envelope.ok !== true || !envelope.value || envelope.value.ok !== true) return null;
-          return envelope.value;
+          const value = envelope.value.value || {};
+          const cards = (value.cards || []).map((card) => ({
+            ...card,
+            key: card.key || card.file || `${card.id}.md`,
+            file: card.file || `${card.id}.md`,
+          }));
+          return { ...envelope.value, value: { ...value, cards } };
         } catch {
           return null;
         }
