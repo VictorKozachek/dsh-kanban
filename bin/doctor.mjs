@@ -224,15 +224,24 @@ if (diag.host && diag.host.available) {
   if (agents.length === 0 && jobs.length === 0) {
     add("ok", "активные задачи", "DSH не видит, что прерывать при закрытии");
   } else {
-    const parts = [
-      ...agents.map((agent) => `сессия ${agent.id} (${agent.status}, очередь ${agent.nextTurn}/${agent.nextStep})`),
-      ...jobs.map((job) => `job ${job.jobId} (${job.kind}, ${job.status})`),
-    ];
+    const jobsByAgent = new Map();
+    for (const job of jobs) {
+      const key = String(job.agentId ?? "");
+      if (!jobsByAgent.has(key)) jobsByAgent.set(key, []);
+      jobsByAgent.get(key).push(job);
+    }
+    const parts = agents.map((agent) => {
+      const own = jobsByAgent.get(String(agent.id ?? "")) || [];
+      const labels = own
+        .map((job) => `${job.kind}:${job.status}${job.label ? ` «${String(job.label).slice(0, 90)}»` : ""}`)
+        .join(", ");
+      return `сессия ${agent.id} (${agent.status}, очередь ${agent.nextTurn}/${agent.nextStep}${labels ? `; ${labels}` : ""})`;
+    });
     add(
       "warn",
       "активные задачи",
       `DSH считает активными: ${parts.join("; ")}`,
-      "если сессии не работают — это фантомная активность (issue #081); смотрите host в диагностике",
+      "это не обязательно фантом: у сессии может быть живой job (sleep/поллинг/долгая команда) — тогда закройте job или дождитесь; если jobs нет, а сессия «не работает» — фантомная активность (issue #081), смотрите host в диагностике",
     );
   }
 }
