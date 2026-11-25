@@ -28,6 +28,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_DIR="$ROOT/dsh-kanban"
 PROFILE="web"
 TAKEOVER=0
+BOARDS_PATH=""
 
 usage() {
   sed -n '3,/^set -euo pipefail/p' "$0" | sed -e 's/^# \{0,1\}//' -e '$d'
@@ -36,6 +37,7 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --takeover) TAKEOVER=1; shift ;;
+    --boards) BOARDS_PATH="${2:?--boards требует путь}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "неизвестная опция: $1" >&2; usage >&2; exit 2 ;;
     *) PROFILE="$1"; shift ;;
@@ -174,6 +176,10 @@ manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\
 print("манифест профиля обновлён: зависимость link: и бандл dsh-kanban")
 PY
   fi
+fi
+
+if [[ -n "$BOARDS_PATH" ]]; then
+  "$ROOT/bin/kanban-config.sh" --boards "$BOARDS_PATH" || echo "не удалось добавить проект в boards — добавьте вручную" >&2
 fi
 
 echo

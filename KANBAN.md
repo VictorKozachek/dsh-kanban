@@ -30,6 +30,8 @@
 | `dsh-kanban/test/watcher.test.mjs` | Тесты правил сторожа: снимок, переходы, ключ доставки |
 | `dsh-kanban/lib/resume.js` | Авто-возврат прерванных сессий: поиск открытого хода в логе, prompt-возврат, дедуп |
 | `dsh-kanban/lib/session-log.js` | Чтение лога сессии (`splitFrames`/`decodeLog`/`openTurnOf`) без записи |
+| `bin/kanban-config.sh`, `bin/kanban-config.mjs` | Безопасно добавить/убрать проект в `boards` патч-слоя (идемпотентно, бэкап) |
+| `dsh-kanban/test/kanban-config.test.mjs` | Тесты добавления/удаления проекта в YAML без порчи комментариев |
 | `bin/kanban-claim.sh`, `bin/kanban-claim.mjs` | claim/release/handoff карточки на хабе (M2) |
 | `dsh-kanban/lib/board-service.js` | Batch-чтение доски на host: `kanbanBoard/read`, tasks + worktree, fallback клиента |
 | `dsh-kanban/test/board-service.test.mjs` | Тест batch-службы: main + worktree карточки |

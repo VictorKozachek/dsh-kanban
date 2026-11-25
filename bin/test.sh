@@ -40,6 +40,7 @@ echo "== рендер доски (регистрация в контексте, 
 "$NODE" "$ROOT/dsh-kanban/test/board-service.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/autostart.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/checkin.test.mjs"
+"$NODE" "$ROOT/dsh-kanban/test/kanban-config.test.mjs"
 "$NODE" "$ROOT/dsh-kanban/test/checkout.test.mjs"
 
 bash "$ROOT/bin/test-onboarding.sh"
