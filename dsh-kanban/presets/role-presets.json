@@ -130,10 +130,6 @@
             "name": "@deepseek-ai/dsh-tool-subagent-control"
           },
           {
-            "id": "tool-subagent-list-agents",
-            "name": "@deepseek-ai/dsh-tool-subagent-control/list-agents"
-          },
-          {
             "id": "tool-subagent",
             "name": "@deepseek-ai/dsh-tool-subagent",
             "config": {
@@ -165,7 +161,11 @@
       },
       {
         "id": "tool-ask-user",
-        "name": "@deepseek-ai/dsh-tool-ask-user"
+        "name": "@deepseek-ai/dsh-tool-ask-user",
+        "config": {
+          "mode": "timed",
+          "timeout": 120
+        }
       },
       {
         "id": "tool-todo",
@@ -195,6 +195,31 @@
         "id": "tool-plugin-market",
         "name": "@deepseek-ai/dsh-plugin-market/tools",
         "disabled": true
+      },
+      {
+        "id": "memory-group",
+        "name": "cordis:group",
+        "group": true,
+        "isolate": {
+          "memory": true
+        },
+        "config": [
+          {
+            "id": "memory",
+            "name": "@vkozachek/dsh-memory",
+            "config": {
+              "namespace": "auto",
+              "inject": {
+                "enabled": true,
+                "top_k": 3,
+                "token_budget": 600
+              },
+              "search": {
+                "default_status": "all"
+              }
+            }
+          }
+        ]
       }
     ]
   },
@@ -329,10 +354,6 @@
             "name": "@deepseek-ai/dsh-tool-subagent-control"
           },
           {
-            "id": "tool-subagent-list-agents",
-            "name": "@deepseek-ai/dsh-tool-subagent-control/list-agents"
-          },
-          {
             "id": "tool-subagent",
             "name": "@deepseek-ai/dsh-tool-subagent",
             "config": {
@@ -364,7 +385,11 @@
       },
       {
         "id": "tool-ask-user",
-        "name": "@deepseek-ai/dsh-tool-ask-user"
+        "name": "@deepseek-ai/dsh-tool-ask-user",
+        "config": {
+          "mode": "timed",
+          "timeout": 120
+        }
       },
       {
         "id": "tool-todo",
@@ -394,6 +419,31 @@
         "id": "tool-plugin-market",
         "name": "@deepseek-ai/dsh-plugin-market/tools",
         "disabled": true
+      },
+      {
+        "id": "memory-group",
+        "name": "cordis:group",
+        "group": true,
+        "isolate": {
+          "memory": true
+        },
+        "config": [
+          {
+            "id": "memory",
+            "name": "@vkozachek/dsh-memory",
+            "config": {
+              "namespace": "auto",
+              "inject": {
+                "enabled": true,
+                "top_k": 3,
+                "token_budget": 600
+              },
+              "search": {
+                "default_status": "all"
+              }
+            }
+          }
+        ]
       }
     ]
   },
@@ -528,10 +578,6 @@
             "name": "@deepseek-ai/dsh-tool-subagent-control"
           },
           {
-            "id": "tool-subagent-list-agents",
-            "name": "@deepseek-ai/dsh-tool-subagent-control/list-agents"
-          },
-          {
             "id": "tool-subagent",
             "name": "@deepseek-ai/dsh-tool-subagent",
             "config": {
@@ -562,10 +608,6 @@
         ]
       },
       {
-        "id": "tool-ask-user",
-        "name": "@deepseek-ai/dsh-tool-ask-user"
-      },
-      {
         "id": "tool-todo",
         "name": "@deepseek-ai/dsh-tool-todo",
         "config": {
@@ -593,6 +635,31 @@
         "id": "tool-plugin-market",
         "name": "@deepseek-ai/dsh-plugin-market/tools",
         "disabled": true
+      },
+      {
+        "id": "memory-group",
+        "name": "cordis:group",
+        "group": true,
+        "isolate": {
+          "memory": true
+        },
+        "config": [
+          {
+            "id": "memory",
+            "name": "@vkozachek/dsh-memory",
+            "config": {
+              "namespace": "auto",
+              "inject": {
+                "enabled": true,
+                "top_k": 3,
+                "token_budget": 600
+              },
+              "search": {
+                "default_status": "all"
+              }
+            }
+          }
+        ]
       }
     ]
   },
@@ -727,10 +794,6 @@
             "name": "@deepseek-ai/dsh-tool-subagent-control"
           },
           {
-            "id": "tool-subagent-list-agents",
-            "name": "@deepseek-ai/dsh-tool-subagent-control/list-agents"
-          },
-          {
             "id": "tool-subagent",
             "name": "@deepseek-ai/dsh-tool-subagent",
             "config": {
@@ -761,10 +824,6 @@
         ]
       },
       {
-        "id": "tool-ask-user",
-        "name": "@deepseek-ai/dsh-tool-ask-user"
-      },
-      {
         "id": "tool-todo",
         "name": "@deepseek-ai/dsh-tool-todo",
         "config": {
@@ -792,6 +851,31 @@
         "id": "tool-plugin-market",
         "name": "@deepseek-ai/dsh-plugin-market/tools",
         "disabled": true
+      },
+      {
+        "id": "memory-group",
+        "name": "cordis:group",
+        "group": true,
+        "isolate": {
+          "memory": true
+        },
+        "config": [
+          {
+            "id": "memory",
+            "name": "@vkozachek/dsh-memory",
+            "config": {
+              "namespace": "auto",
+              "inject": {
+                "enabled": true,
+                "top_k": 3,
+                "token_budget": 600
+              },
+              "search": {
+                "default_status": "all"
+              }
+            }
+          }
+        ]
       }
     ]
   },
@@ -926,10 +1010,6 @@
             "name": "@deepseek-ai/dsh-tool-subagent-control"
           },
           {
-            "id": "tool-subagent-list-agents",
-            "name": "@deepseek-ai/dsh-tool-subagent-control/list-agents"
-          },
-          {
             "id": "tool-subagent",
             "name": "@deepseek-ai/dsh-tool-subagent",
             "config": {
@@ -960,10 +1040,6 @@
         ]
       },
       {
-        "id": "tool-ask-user",
-        "name": "@deepseek-ai/dsh-tool-ask-user"
-      },
-      {
         "id": "tool-todo",
         "name": "@deepseek-ai/dsh-tool-todo",
         "config": {
@@ -991,6 +1067,31 @@
         "id": "tool-plugin-market",
         "name": "@deepseek-ai/dsh-plugin-market/tools",
         "disabled": true
+      },
+      {
+        "id": "memory-group",
+        "name": "cordis:group",
+        "group": true,
+        "isolate": {
+          "memory": true
+        },
+        "config": [
+          {
+            "id": "memory",
+            "name": "@vkozachek/dsh-memory",
+            "config": {
+              "namespace": "auto",
+              "inject": {
+                "enabled": true,
+                "top_k": 3,
+                "token_budget": 600
+              },
+              "search": {
+                "default_status": "all"
+              }
+            }
+          }
+        ]
       }
     ]
   },
@@ -1125,10 +1226,6 @@
             "name": "@deepseek-ai/dsh-tool-subagent-control"
           },
           {
-            "id": "tool-subagent-list-agents",
-            "name": "@deepseek-ai/dsh-tool-subagent-control/list-agents"
-          },
-          {
             "id": "tool-subagent",
             "name": "@deepseek-ai/dsh-tool-subagent",
             "config": {
@@ -1160,7 +1257,11 @@
       },
       {
         "id": "tool-ask-user",
-        "name": "@deepseek-ai/dsh-tool-ask-user"
+        "name": "@deepseek-ai/dsh-tool-ask-user",
+        "config": {
+          "mode": "timed",
+          "timeout": 120
+        }
       },
       {
         "id": "tool-todo",
@@ -1190,6 +1291,31 @@
         "id": "tool-plugin-market",
         "name": "@deepseek-ai/dsh-plugin-market/tools",
         "disabled": true
+      },
+      {
+        "id": "memory-group",
+        "name": "cordis:group",
+        "group": true,
+        "isolate": {
+          "memory": true
+        },
+        "config": [
+          {
+            "id": "memory",
+            "name": "@vkozachek/dsh-memory",
+            "config": {
+              "namespace": "auto",
+              "inject": {
+                "enabled": true,
+                "top_k": 3,
+                "token_budget": 600
+              },
+              "search": {
+                "default_status": "all"
+              }
+            }
+          }
+        ]
       }
     ]
   }
